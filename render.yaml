@@ -1,6 +1,7 @@
 services:
   - type: web
     name: assistlink-backend
+    plan: free
     env: python
     rootDir: AssistLink-Backend
     buildCommand: pip install -r requirements.txt
