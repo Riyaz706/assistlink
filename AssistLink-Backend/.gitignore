@@ -38,7 +38,7 @@ venv.bak/
 
 # Logs
 *.log
-logs/
+41: logs/
 
 # Database
 *.db
@@ -56,4 +56,4 @@ dmypy.json
 
 credentials/
 firebase-service-account.json
-*.json
+# *.json - Removed as it blocks nested frontend files

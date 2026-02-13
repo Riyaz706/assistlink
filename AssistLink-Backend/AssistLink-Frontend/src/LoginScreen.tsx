@@ -128,7 +128,10 @@ const LoginScreen = ({ navigation }: any) => {
             </TouchableOpacity>
 
             {error ? (
-              <Text style={styles.errorText}>{error}</Text>
+              <View style={styles.errorContainer}>
+                <Icon name="alert-circle-outline" size={20} color="#DC2626" />
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
             ) : null}
 
             <TouchableOpacity
@@ -183,11 +186,21 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background,
   },
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FEE2E2',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+  },
   errorText: {
     color: '#DC2626',
-    marginBottom: 12,
+    marginLeft: 8,
     fontSize: 14,
-    textAlign: 'center',
+    flex: 1,
   },
   container: {
     flex: 1,

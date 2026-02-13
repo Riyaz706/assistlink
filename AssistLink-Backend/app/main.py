@@ -115,7 +115,7 @@ app.include_router(emergency.router, prefix="/api/emergency", tags=["Emergency"]
 app.include_router(test.router, tags=["Test"])
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 async def root():
     return {
         "message": "AssistLink Backend API",
@@ -124,7 +124,7 @@ async def root():
     }
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health_check():
     """Basic health check endpoint"""
     return {

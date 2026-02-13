@@ -1,8 +1,15 @@
-// Use environment variable - fallback removed for deployment
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || (() => {
-  console.error('[API] EXPO_PUBLIC_API_BASE_URL is not set!');
-  throw new Error('API_BASE_URL not configured');
-})();
+// API URL: env var, Constants.extra, or fallback to Render production
+function getApiBaseUrl(): string {
+  const fromEnv = process.env.EXPO_PUBLIC_API_BASE_URL;
+  if (fromEnv) return fromEnv.replace(/\/$/, ''); // strip trailing slash
+  try {
+    const Constants = require('expo-constants').default;
+    const fromExtra = Constants.expoConfig?.extra?.apiBaseUrl || Constants.expoConfig?.extra?.EXPO_PUBLIC_API_BASE_URL;
+    if (fromExtra) return String(fromExtra).replace(/\/$/, '');
+  } catch {}
+  return 'https://assistlink-nd65.onrender.com';
+}
+const API_BASE_URL = getApiBaseUrl();
 
 // Log the API base URL on initialization (helps debug connection issues)
 if (typeof window !== 'undefined') {
@@ -72,7 +79,11 @@ async function request<T>(
       } catch {
         // ignore JSON parse error, keep text
       }
-      throw new Error(message);
+
+      // Add diagnostic info to error message
+      const diagnosticMsg = `API Error [${res.status}] at ${url}: ${message}`;
+      console.error(`[API] ${diagnosticMsg}`);
+      throw new Error(diagnosticMsg);
     }
 
     if (!text) {
