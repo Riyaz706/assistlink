@@ -22,3 +22,23 @@ services:
         sync: false
       - key: SECRET_KEY
         sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_API_KEY_SID
+        sync: false
+      - key: TWILIO_API_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: GOOGLE_WEB_CLIENT_ID
+        sync: false
+      - key: GOOGLE_IOS_CLIENT_ID
+        sync: false
+      - key: GOOGLE_ANDROID_CLIENT_ID
+        sync: false
+      - key: FCM_SERVICE_ACCOUNT_PATH
+        sync: false
