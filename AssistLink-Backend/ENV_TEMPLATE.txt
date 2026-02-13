@@ -1,0 +1,80 @@
+# ============================================
+# AssistLink Backend - Environment Variables
+# ============================================
+# Copy this content to your .env file and fill in your actual values
+# ============================================
+
+# ============================================
+# REQUIRED - Supabase Configuration
+# ============================================
+# Get these from: Supabase Dashboard > Settings > API
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_ANON_KEY=your_supabase_anon_key_here
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key_here
+
+# ============================================
+# OPTIONAL - Database Configuration
+# ============================================
+# Option 1: Use full connection string (recommended)
+# DATABASE_URL=postgresql://postgres:your_password@db.your-project-ref.supabase.co:5432/postgres?sslmode=require
+
+# Option 2: Use individual components (if DATABASE_URL not provided)
+# SUPABASE_DB_PASSWORD=your_database_password_here
+
+# ============================================
+# OPTIONAL - Server Configuration
+# ============================================
+PORT=8000
+HOST=0.0.0.0
+ENVIRONMENT=development
+
+# ============================================
+# OPTIONAL - CORS Configuration
+# ============================================
+# Comma-separated list of allowed origins, or use ["*"] for all
+# CORS_ORIGINS=http://localhost:3000,http://localhost:8081,http://localhost:19006
+
+# ============================================
+# OPTIONAL - Video Call Configuration
+# ============================================
+VIDEO_CALL_DURATION_SECONDS=15
+
+# ============================================
+# OPTIONAL - Firebase Cloud Messaging (FCM)
+# ============================================
+# Path to Firebase service account JSON file for push notifications
+FCM_SERVICE_ACCOUNT_PATH=./credentials/firebase-service-account.json
+
+# ============================================
+# OPTIONAL - Twilio Video Configuration
+# ============================================
+# Get these from: Twilio Console > Account > API Keys & Tokens
+# TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# TWILIO_AUTH_TOKEN=your_twilio_auth_token_here
+# TWILIO_API_KEY_SID=SKxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# TWILIO_API_KEY_SECRET=your_twilio_api_key_secret_here
+
+# ============================================
+# OPTIONAL - Razorpay Payment Configuration
+# ============================================
+# Currently in BYPASS MODE - Chat is enabled directly without payment
+# To enable Razorpay later, uncomment and add your test keys:
+# Get these from: Razorpay Dashboard > Settings > API Keys
+# RAZORPAY_KEY_ID=rzp_test_xxxxxxxxxxxxx
+# RAZORPAY_KEY_SECRET=your_test_key_secret_here
+
+# ============================================
+# NOTES:
+# ============================================
+# 1. REQUIRED fields: SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY
+# 2. All other fields are OPTIONAL and have defaults
+# 3. Never commit .env file to git (it's in .gitignore)
+# 4. Payment is currently in BYPASS MODE - Razorpay keys not needed
+# ============================================
+
+
+
+
+
+
+

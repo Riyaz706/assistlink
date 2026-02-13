@@ -1,0 +1,9 @@
+node_modules/
+.expo/
+dist/
+.DS_Store
+**/node_modules/
+-e 
+# Environment files
+*.env
+*.env.*
