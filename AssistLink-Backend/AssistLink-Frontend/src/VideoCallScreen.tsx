@@ -13,6 +13,7 @@ import { WebView } from 'react-native-webview';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { api } from './api/client';
+import { useErrorHandler, isNetworkError, retryOperation } from './hooks/useErrorHandler';
 
 const VideoCallScreen = () => {
   const navigation = useNavigation();
@@ -21,23 +22,59 @@ const VideoCallScreen = () => {
 
   const [videoCallUrl, setVideoCallUrl] = useState<string | null>(initialUrl || null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { error, handleError, clearError } = useErrorHandler();
 
   useEffect(() => {
     const fetchCallDetails = async () => {
+      // 1. Check Permissions
+      if (Platform.OS !== 'web') {
+        try {
+          const { Camera } = require('expo-camera');
+          const { Audio } = require('expo-av');
+
+          const cameraStatus = await Camera.requestCameraPermissionsAsync();
+          const audioStatus = await Audio.requestPermissionsAsync();
+
+          if (cameraStatus.status !== 'granted' || audioStatus.status !== 'granted') {
+            Alert.alert(
+              "Permissions Required",
+              "Camera and Microphone permissions are needed for video calls.",
+              [{ text: "Go Back", onPress: () => navigation.goBack() }]
+            );
+            setLoading(false);
+            return;
+          }
+        } catch (e) {
+          console.warn("Error requesting permissions", e);
+          // Continue anyway, maybe it works or user handled it
+        }
+      }
+
       if (videoCallUrl) {
         setLoading(false);
         return;
       }
 
+      // ... existing fetch logic ...
       if (!callId) {
-        setError('No call ID provided');
+        handleError(new Error('No call ID provided'), 'video-call-init');
         setLoading(false);
         return;
       }
 
       try {
-        const details = await api.getVideoCallRequest(callId) as any;
+        // Use retry logic for fetching call details
+        const details = await retryOperation(
+          () => api.getVideoCallRequest(callId),
+          {
+            maxRetries: 2,
+            delayMs: 1000,
+            onRetry: (attempt) => {
+              console.log(`[VideoCallScreen] Retry attempt ${attempt} for fetching call details`);
+            }
+          }
+        ) as any;
+
         if (details && details.video_call_url) {
           let url = details.video_call_url;
           // Fix for legacy/placeholder URLs in database
@@ -47,12 +84,13 @@ const VideoCallScreen = () => {
             url = `https://meet.jit.si/assistlink-${id}`;
           }
           setVideoCallUrl(url);
+          clearError();
         } else {
-          setError('Video call URL not found');
+          handleError(new Error('Video call URL not found'), 'video-call-fetch');
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('Failed to fetch video call details', err);
-        setError(`Failed to load video call: ${err.message || String(err)}`);
+        handleError(err, 'video-call-fetch');
       } finally {
         setLoading(false);
       }
@@ -63,20 +101,21 @@ const VideoCallScreen = () => {
 
   // Notify backend that user joined the call
   useEffect(() => {
-    if (callId && !loading && videoCallUrl) {
+    if (callId && !loading && videoCallUrl && !error) {
       const joinCall = async () => {
         try {
           console.log('[VideoCallScreen] Joining call:', callId);
           await api.joinVideoCall(callId);
           console.log('[VideoCallScreen] Joined call notification sent');
-        } catch (err) {
+        } catch (err: any) {
           console.error('[VideoCallScreen] Failed to send join notification', err);
+          // Don't show error to user - this is non-critical
         }
       };
 
       joinCall();
     }
-  }, [callId, loading, videoCallUrl]);
+  }, [callId, loading, videoCallUrl, error]);
 
   if (loading) {
     return (
@@ -91,7 +130,7 @@ const VideoCallScreen = () => {
     return (
       <View style={styles.errorContainer}>
         <Icon name="video-off" size={48} color="#EF4444" />
-        <Text style={styles.errorText}>{error || 'Unable to connect'}</Text>
+        <Text style={styles.errorText}>{error?.message || 'Unable to connect to video call'}</Text>
         <Text
           style={styles.retryButton}
           onPress={() => navigation.goBack()}

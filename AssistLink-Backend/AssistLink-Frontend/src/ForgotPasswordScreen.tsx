@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar, KeyboardAvoidingView, Platform, ScrollView, Alert } from 'react-native';
 import { useAuth } from './context/AuthContext';
+import { useErrorHandler } from './hooks/useErrorHandler';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -17,22 +18,24 @@ const COLORS = {
 const ForgotPasswordScreen = ({ navigation }: any) => {
     const [email, setEmail] = useState('');
     const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    // Removed local error state
     const { resetPassword } = useAuth();
+    const { error, handleError, clearError } = useErrorHandler();
 
     const handleResetPassword = async () => {
+        clearError();
+
         if (!email) {
-            setError('Please enter your email address');
+            handleError(new Error('Please enter your email address'), 'validation');
             return;
         }
 
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!emailRegex.test(email)) {
-            setError('Please enter a valid email address');
+            handleError(new Error('Please enter a valid email address'), 'validation');
             return;
         }
 
-        setError(null);
         setLoading(true);
 
         try {
@@ -48,7 +51,7 @@ const ForgotPasswordScreen = ({ navigation }: any) => {
                 ]
             );
         } catch (e: any) {
-            setError(e?.message || 'Failed to send reset email. Please try again.');
+            handleError(e, 'forgot-password');
         } finally {
             setLoading(false);
         }
@@ -90,7 +93,7 @@ const ForgotPasswordScreen = ({ navigation }: any) => {
                     <View style={styles.formContainer}>
                         <View style={styles.inputWrapper}>
                             <Text style={styles.label}>Email Address</Text>
-                            <View style={styles.inputContainer}>
+                            <View style={[styles.inputContainer, error && { borderColor: '#DC2626' }]}>
                                 <Icon name="email-outline" size={20} color={COLORS.placeholder} style={styles.inputIcon} />
                                 <TextInput
                                     style={styles.input}
@@ -99,14 +102,19 @@ const ForgotPasswordScreen = ({ navigation }: any) => {
                                     keyboardType="email-address"
                                     autoCapitalize="none"
                                     value={email}
-                                    onChangeText={setEmail}
+                                    onChangeText={(text) => {
+                                        setEmail(text);
+                                        if (error) clearError();
+                                    }}
                                     editable={!loading}
                                 />
                             </View>
                         </View>
 
                         {error ? (
-                            <Text style={styles.errorText}>{error}</Text>
+                            <View style={{ marginBottom: 12, padding: 8, backgroundColor: '#FEF2F2', borderRadius: 8 }}>
+                                <Text style={styles.errorText}>{error.message}</Text>
+                            </View>
                         ) : null}
 
                         <TouchableOpacity

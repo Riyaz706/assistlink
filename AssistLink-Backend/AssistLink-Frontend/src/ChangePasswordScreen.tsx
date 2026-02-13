@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { api } from './api/client';
+import { useErrorHandler, ErrorDetails } from './hooks/useErrorHandler';
 
 const THEME = {
     primary: '#059669',
@@ -25,27 +26,42 @@ const THEME = {
     error: '#EF4444',
 };
 
+const ErrorBanner = ({ error, onDismiss }: { error: ErrorDetails | null, onDismiss: () => void }) => {
+    if (!error) return null;
+    return (
+        <View style={styles.errorBanner}>
+            <MaterialCommunityIcons name="alert-circle" size={20} color="#FFF" />
+            <Text style={styles.errorText}>{error.message}</Text>
+            <TouchableOpacity onPress={onDismiss}>
+                <MaterialCommunityIcons name="close" size={20} color="#FFF" />
+            </TouchableOpacity>
+        </View>
+    );
+};
+
 export default function ChangePasswordScreen({ navigation }: any) {
     const [currentPassword, setCurrentPassword] = useState('');
     const [newPassword, setNewPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
+    const { handleError, error, clearError } = useErrorHandler();
 
     const handleChangePassword = async () => {
+        clearError();
         // For OAuth users, current password can be empty
         if (!newPassword || !confirmPassword) {
-            Alert.alert('Error', 'Please fill in the new password fields');
+            handleError(new Error('Please fill in the new password fields'), 'validation');
             return;
         }
 
         if (newPassword.length < 6) {
-            Alert.alert('Error', 'New password must be at least 6 characters long');
+            handleError(new Error('New password must be at least 6 characters long'), 'validation');
             return;
         }
 
         if (newPassword !== confirmPassword) {
-            Alert.alert('Error', 'New passwords do not match');
+            handleError(new Error('New passwords do not match'), 'validation');
             return;
         }
 
@@ -59,8 +75,7 @@ export default function ChangePasswordScreen({ navigation }: any) {
                 { text: 'OK', onPress: () => navigation.goBack() }
             ]);
         } catch (error: any) {
-            console.error('Password change failed:', error);
-            Alert.alert('Error', error.message || 'Failed to update password');
+            handleError(error, 'change-password');
         } finally {
             setLoading(false);
         }
@@ -79,6 +94,8 @@ export default function ChangePasswordScreen({ navigation }: any) {
                     <Text style={styles.headerTitle}>Change Password</Text>
                     <View style={{ width: 40 }} />
                 </View>
+
+                <ErrorBanner error={error} onDismiss={clearError} />
 
                 <ScrollView contentContainerStyle={styles.scrollContent}>
                     <View style={styles.iconContainer}>
@@ -102,7 +119,10 @@ export default function ChangePasswordScreen({ navigation }: any) {
                                 placeholder="Enter current password"
                                 secureTextEntry={!showPassword}
                                 value={currentPassword}
-                                onChangeText={setCurrentPassword}
+                                onChangeText={(text) => {
+                                    setCurrentPassword(text);
+                                    if (error) clearError();
+                                }}
                                 autoCapitalize="none"
                             />
                             <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
@@ -122,7 +142,10 @@ export default function ChangePasswordScreen({ navigation }: any) {
                                 placeholder="Enter new password"
                                 secureTextEntry={!showPassword}
                                 value={newPassword}
-                                onChangeText={setNewPassword}
+                                onChangeText={(text) => {
+                                    setNewPassword(text);
+                                    if (error) clearError();
+                                }}
                                 autoCapitalize="none"
                             />
                         </View>
@@ -135,7 +158,10 @@ export default function ChangePasswordScreen({ navigation }: any) {
                                 placeholder="Confirm new password"
                                 secureTextEntry={!showPassword}
                                 value={confirmPassword}
-                                onChangeText={setConfirmPassword}
+                                onChangeText={(text) => {
+                                    setConfirmPassword(text);
+                                    if (error) clearError();
+                                }}
                                 autoCapitalize="none"
                             />
                         </View>
@@ -250,5 +276,20 @@ const styles = StyleSheet.create({
         color: '#FFF',
         fontSize: 16,
         fontWeight: 'bold',
+    },
+    errorBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#EF4444',
+        padding: 10,
+        marginHorizontal: 16,
+        marginTop: 8,
+        borderRadius: 8,
+    },
+    errorText: {
+        color: '#FFF',
+        marginLeft: 8,
+        flex: 1,
+        fontSize: 14,
     },
 });

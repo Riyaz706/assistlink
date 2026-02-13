@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, ScrollView, 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { useErrorHandler } from './hooks/useErrorHandler';
 import { api } from './api/client';
 import { useAuth } from './context/AuthContext';
 
@@ -20,10 +21,12 @@ const THEME = {
   acceptedText: "#2563EB",
   declinedBg: "#FEE2E2",
   declinedText: "#DC2626",
+  error: "#EF4444",
 };
 
 export default function ScheduleScreen({ navigation, route }: any) {
   const { user } = useAuth();
+  const { handleError, error, clearError } = useErrorHandler();
   const [videoCalls, setVideoCalls] = useState<any[]>([]);
   const [bookings, setBookings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,18 +39,20 @@ export default function ScheduleScreen({ navigation, route }: any) {
 
   const fetchData = async () => {
     try {
-      setLoading(true);
+      if (!refreshing) setLoading(true);
+      clearError();
       const [videoCallsData, bookingsData] = await Promise.all([
         api.getDashboardVideoCalls({ limit: 100 }),
         api.getDashboardBookings({ limit: 100 }),
       ]);
-      console.log("[ScheduleScreen] Video calls fetched:", videoCallsData?.length || 0);
-      console.log("[ScheduleScreen] Bookings fetched:", bookingsData?.length || 0);
-      console.log("[ScheduleScreen] Bookings data:", JSON.stringify(bookingsData, null, 2));
-      setVideoCalls(videoCallsData || []);
-      setBookings(bookingsData || []);
+      console.log("[ScheduleScreen] Video calls fetched:", (videoCallsData as any[])?.length || 0);
+      console.log("[ScheduleScreen] Bookings fetched:", (bookingsData as any[])?.length || 0);
+      // console.log("[ScheduleScreen] Bookings data:", JSON.stringify(bookingsData, null, 2));
+      setVideoCalls((videoCallsData as any[]) || []);
+      setBookings((bookingsData as any[]) || []);
     } catch (e: any) {
       console.error("Failed to fetch schedule data:", e);
+      handleError(e, 'schedule-fetch');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -207,8 +212,11 @@ export default function ScheduleScreen({ navigation, route }: any) {
                 }
                 // Refresh data to show the booking that should have been created
                 await fetchData();
-              } catch (error) {
+              } catch (error: any) {
                 console.error('[ScheduleScreen] Error accepting video call:', error);
+                handleError(error, 'accept-video-call');
+                // We typically still want to navigate to the video call even if acceptance/refresh fails
+                // as it might be a transient network issue or already accepted.
               }
               // Navigate to video call screen (15-second placeholder)
               navigation.navigate('VideoCallScreen', {
@@ -343,6 +351,18 @@ export default function ScheduleScreen({ navigation, route }: any) {
         <Text style={styles.title}>My Schedule</Text>
         <View style={{ width: 24 }} />
       </View>
+
+      {error && (
+        <View style={styles.errorBanner}>
+          <Icon name="alert-circle" size={20} color="#fff" />
+          <Text style={styles.errorText} numberOfLines={2}>
+            {error.message || "An error occurred"}
+          </Text>
+          <TouchableOpacity onPress={clearError}>
+            <Icon name="close" size={20} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      )}
 
       <View style={styles.tabsContainer}>
         {!shouldHideVideoCallsTab && (
@@ -500,5 +520,21 @@ const styles = StyleSheet.create({
     color: THEME.subText,
     marginTop: 12,
     textAlign: 'center',
+  },
+  errorBanner: {
+    backgroundColor: THEME.error,
+    padding: 12,
+    margin: 16,
+    marginBottom: 0,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  errorText: {
+    color: '#fff',
+    fontSize: 14,
+    flex: 1,
+    fontWeight: '500',
   },
 });

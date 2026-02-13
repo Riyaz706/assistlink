@@ -1,7 +1,15 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from uuid import UUID
+from app.validators import (
+    validate_email,
+    validate_phone,
+    validate_password,
+    validate_date_of_birth,
+    validate_role,
+    sanitize_string
+)
 
 
 # User Schemas
@@ -14,10 +22,40 @@ class UserBase(BaseModel):
     address: Optional[Dict[str, Any]] = None
     profile_photo_url: Optional[str] = None
     emergency_contact: Optional[Dict[str, Any]] = None
+    
+    @field_validator('email')
+    @classmethod
+    def validate_email_field(cls, v):
+        return validate_email(v)
+    
+    @field_validator('full_name')
+    @classmethod
+    def validate_full_name(cls, v):
+        v = sanitize_string(v, max_length=255)
+        if not v or len(v) < 2:
+            raise ValueError("Full name must be at least 2 characters long")
+        return v
+    
+    @field_validator('phone')
+    @classmethod
+    def validate_phone_field(cls, v):
+        if v:
+            return validate_phone(v)
+        return v
+    
+    @field_validator('role')
+    @classmethod
+    def validate_role_field(cls, v):
+        return validate_role(v)
 
 
 class UserCreate(UserBase):
-    password: str = Field(..., min_length=6)
+    password: str = Field(..., min_length=8)
+    
+    @field_validator('password')
+    @classmethod
+    def validate_password_field(cls, v):
+        return validate_password(v, min_length=8)
 
 
 class LoginRequest(BaseModel):
@@ -179,6 +217,23 @@ class LocationUpdate(BaseModel):
     latitude: float = Field(..., ge=-90, le=90)
     longitude: float = Field(..., ge=-180, le=180)
     address: Optional[str] = None
+    
+    @field_validator('latitude', 'longitude')
+    @classmethod
+    def validate_coordinates_field(cls, v, info):
+        # Additional validation beyond Field constraints
+        if info.field_name == 'latitude' and not (-90 <= v <= 90):
+            raise ValueError("Latitude must be between -90 and 90 degrees")
+        if info.field_name == 'longitude' and not (-180 <= v <= 180):
+            raise ValueError("Longitude must be between -180 and 180 degrees")
+        return v
+    
+    @field_validator('address')
+    @classmethod
+    def validate_address_field(cls, v):
+        if v:
+            return sanitize_string(v, max_length=500)
+        return v
 
 
 class LocationResponse(BaseModel):
@@ -195,6 +250,8 @@ class DashboardStats(BaseModel):
     completed_bookings: int
     pending_video_calls: int
     active_chat_sessions: int
+    total_earnings: float = 0.0
+    avg_rating: float = 0.0
 
 
 # Message Schemas

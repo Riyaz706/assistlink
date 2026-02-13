@@ -16,6 +16,7 @@ import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import BottomNav from './BottomNav';
 import { api } from './api/client';
 import { useAuth } from './context/AuthContext';
+import { useErrorHandler } from './hooks/useErrorHandler';
 
 const THEME = {
   bg: "#F5F7F5",
@@ -34,8 +35,11 @@ const ChatList = ({ navigation }: any) => {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
+  const { error, handleError, clearError } = useErrorHandler();
+
   const loadChatSessions = async () => {
     try {
+      clearError();
       setLoading(true);
       const sessions = await api.getChatSessions();
       console.log("Chat sessions received:", JSON.stringify(sessions, null, 2));
@@ -44,7 +48,7 @@ const ChatList = ({ navigation }: any) => {
       console.log("Enabled sessions:", enabledSessions.length);
       setChatSessions(enabledSessions);
     } catch (e: any) {
-      console.error("Failed to load chat sessions:", e);
+      handleError(e, 'chat-list-load');
     } finally {
       setLoading(false);
       setRefreshing(false);

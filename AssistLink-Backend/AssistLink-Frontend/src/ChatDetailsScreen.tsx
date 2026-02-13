@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { api } from './api/client';
 import { useAuth } from './context/AuthContext';
+import { useErrorHandler } from './hooks/useErrorHandler';
 
 const THEME = {
   bg: "#F5F7F5",
@@ -42,18 +43,22 @@ const ChatDetailsScreen = ({ route, navigation }: any) => {
   const scrollViewRef = useRef<ScrollView>(null);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  const { error, handleError, clearError } = useErrorHandler();
+
   const loadMessages = async () => {
     try {
+      clearError();
       const data = await api.getMessages(chatSessionId, { limit: 100 });
       setMessages((data as any[]) || []);
       // Mark messages as read
       try {
         await api.markMessagesAsRead(chatSessionId);
       } catch (e) {
-        // ignore
+        // Silent fail for marking read is acceptable
+        console.log("Failed to mark messages read", e);
       }
     } catch (e: any) {
-      console.error("Failed to load messages:", e);
+      handleError(e, 'chat-load-messages');
     } finally {
       setLoading(false);
     }
@@ -73,6 +78,7 @@ const ChatDetailsScreen = ({ route, navigation }: any) => {
         }
       }
     } catch (e) {
+      // Non-critical, log but don't show user error
       console.error("Failed to load session details:", e);
     }
   };
@@ -84,7 +90,10 @@ const ChatDetailsScreen = ({ route, navigation }: any) => {
 
       // Poll for new messages every 2 seconds
       pollIntervalRef.current = setInterval(() => {
-        loadMessages();
+        // Silent poll, don't use main error handler for background polling
+        api.getMessages(chatSessionId, { limit: 100 })
+          .then(data => setMessages((data as any[]) || []))
+          .catch(err => console.log("Polling error:", err));
       }, 2000);
 
       return () => {
@@ -101,17 +110,19 @@ const ChatDetailsScreen = ({ route, navigation }: any) => {
     const messageText = inputText.trim();
     setInputText('');
     setSending(true);
+    clearError();
 
     try {
       await api.sendMessage(chatSessionId, { content: messageText });
       // Reload messages to show the new one
-      await loadMessages();
+      const data = await api.getMessages(chatSessionId, { limit: 100 });
+      setMessages((data as any[]) || []);
       // Scroll to bottom
       setTimeout(() => {
         scrollViewRef.current?.scrollToEnd({ animated: true });
       }, 100);
     } catch (e: any) {
-      console.error("Failed to send message:", e);
+      handleError(e, 'chat-send-message');
       setInputText(messageText); // Restore text on error
     } finally {
       setSending(false);

@@ -5,6 +5,12 @@ from app.schemas import MessageCreate, MessageResponse, ChatSessionResponse
 from app.database import supabase, supabase_admin
 from app.dependencies import get_current_user
 from app.services.notifications import notify_new_message
+from app.error_handler import (
+    NotFoundError,
+    AuthorizationError,
+    DatabaseError,
+    ValidationError
+)
 
 router = APIRouter()
 
@@ -68,13 +74,8 @@ async def get_chat_sessions(current_user: dict = Depends(get_current_user)):
         
         return enriched_sessions
     
-    except HTTPException:
-        raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error retrieving chat sessions: {str(e)}"
-        )
+        raise DatabaseError(f"Error retrieving chat sessions: {str(e)}")
 
 
 @router.get("/sessions/{chat_session_id}", response_model=ChatSessionResponse)
@@ -89,10 +90,7 @@ async def get_chat_session(
             response = supabase_admin.table("chat_sessions").select("*").eq("id", chat_session_id).execute()
             
             if not response.data:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Chat session not found"
-                )
+                raise NotFoundError("Chat session not found")
         except Exception as e:
             error_msg = str(e).lower()
             if "not found" in error_msg or "0 rows" in error_msg or "pgrst116" in error_msg:
@@ -143,10 +141,7 @@ async def get_messages(
             chat_response = supabase_admin.table("chat_sessions").select("*").eq("id", chat_session_id).execute()
             
             if not chat_response.data:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Chat session not found"
-                )
+                raise NotFoundError("Chat session not found")
         except Exception as e:
             error_msg = str(e).lower()
             if "not found" in error_msg or "0 rows" in error_msg or "pgrst116" in error_msg:
@@ -160,17 +155,11 @@ async def get_messages(
         
         # Verify user has access
         if chat_session["care_recipient_id"] != current_user["id"] and chat_session["caregiver_id"] != current_user["id"]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied"
-            )
+            raise AuthorizationError("Access denied")
         
         # Verify chat is enabled
         if not chat_session["is_enabled"]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Chat session is not enabled"
-            )
+            raise AuthorizationError("Chat session is not enabled")
         
         # Get messages using admin client to bypass RLS
         query = supabase_admin.table("messages").select("*, sender:sender_id(*), recipient:recipient_id(*)").eq("chat_session_id", chat_session_id).order("created_at", desc=False).range(offset, offset + limit - 1)
@@ -182,10 +171,7 @@ async def get_messages(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise DatabaseError(str(e))
 
 
 @router.post("/sessions/{chat_session_id}/messages", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
@@ -201,10 +187,7 @@ async def send_message(
             chat_response = supabase_admin.table("chat_sessions").select("*").eq("id", chat_session_id).execute()
             
             if not chat_response.data:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Chat session not found"
-                )
+                raise NotFoundError("Chat session not found")
         except Exception as e:
             error_msg = str(e).lower()
             if "not found" in error_msg or "0 rows" in error_msg or "pgrst116" in error_msg:
@@ -218,17 +201,11 @@ async def send_message(
         
         # Verify user has access
         if chat_session["care_recipient_id"] != current_user["id"] and chat_session["caregiver_id"] != current_user["id"]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied"
-            )
+            raise AuthorizationError("Access denied")
         
         # Verify chat is enabled
         if not chat_session["is_enabled"]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Chat session is not enabled"
-            )
+            raise AuthorizationError("Chat session is not enabled")
         
         # Determine recipient
         recipient_id = chat_session["caregiver_id"] if chat_session["care_recipient_id"] == current_user["id"] else chat_session["care_recipient_id"]
@@ -247,10 +224,7 @@ async def send_message(
         response = supabase_admin.table("messages").insert(message_dict).execute()
         
         if not response.data or len(response.data) == 0:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to send message"
-            )
+            raise DatabaseError("Failed to send message")
         
         # The inserted message already has all required fields for MessageResponse
         # Just return it directly - the join with sender/recipient is optional and only needed for getMessages
@@ -275,10 +249,7 @@ async def send_message(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise DatabaseError(str(e))
 
 
 @router.post("/sessions/{chat_session_id}/read")
@@ -293,10 +264,7 @@ async def mark_messages_as_read(
             chat_response = supabase_admin.table("chat_sessions").select("*").eq("id", chat_session_id).execute()
             
             if not chat_response.data:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Chat session not found"
-                )
+                raise NotFoundError("Chat session not found")
         except Exception as e:
             error_msg = str(e).lower()
             if "not found" in error_msg or "0 rows" in error_msg or "pgrst116" in error_msg:
@@ -310,10 +278,7 @@ async def mark_messages_as_read(
         
         # Verify user has access
         if chat_session["care_recipient_id"] != current_user["id"] and chat_session["caregiver_id"] != current_user["id"]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied"
-            )
+            raise AuthorizationError("Access denied")
         
         # Mark messages as read using admin client to bypass RLS
         # Update all unread messages for this recipient in this session in a single query
@@ -343,8 +308,5 @@ async def mark_messages_as_read(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise DatabaseError(str(e))
 

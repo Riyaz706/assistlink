@@ -12,8 +12,22 @@ import {
   Platform
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { api } from './api/client';
+import { useErrorHandler, ErrorDetails } from './hooks/useErrorHandler';
+
+const ErrorBanner = ({ error, onDismiss }: { error: ErrorDetails | null, onDismiss: () => void }) => {
+  if (!error) return null;
+  return (
+    <View style={styles.errorBanner}>
+      <Icon name="alert-circle" size={20} color="#FFF" />
+      <Text style={styles.errorText}>{error.message}</Text>
+      <TouchableOpacity onPress={onDismiss}>
+        <Icon name="close" size={20} color="#FFF" />
+      </TouchableOpacity>
+    </View>
+  );
+};
 
 const THEME = {
   primary: "#059669",
@@ -43,6 +57,7 @@ export default function CaregiverAppointmentDetailScreen({ route, navigation }: 
 
   const [status, setStatus] = useState(appointment.status);
   const [loading, setLoading] = useState(false);
+  const { error, handleError, clearError } = useErrorHandler();
 
   // Log to verify new code is loaded
   console.log('[AppointmentDetail] Component mounted with appointment:', {
@@ -61,6 +76,7 @@ export default function CaregiverAppointmentDetailScreen({ route, navigation }: 
         text: "Accept",
         onPress: async () => {
           try {
+            clearError();
             setLoading(true);
             console.log('[AppointmentDetail] Accepting appointment:', appointment.id);
             console.log('[AppointmentDetail] Is video call:', appointment.isVideoCall);
@@ -81,8 +97,7 @@ export default function CaregiverAppointmentDetailScreen({ route, navigation }: 
             setStatus('Confirmed');
             Alert.alert('Success', 'Appointment accepted successfully!');
           } catch (error: any) {
-            console.error('[AppointmentDetail] Failed to accept:', error);
-            Alert.alert('Error', error.message || 'Failed to accept appointment');
+            handleError(error, 'accept-appointment');
           } finally {
             setLoading(false);
           }
@@ -100,6 +115,7 @@ export default function CaregiverAppointmentDetailScreen({ route, navigation }: 
         style: "destructive",
         onPress: async () => {
           try {
+            clearError();
             setLoading(true);
             console.log('[AppointmentDetail] Declining appointment:', appointment.id);
             console.log('[AppointmentDetail] Is video call:', appointment.isVideoCall);
@@ -121,8 +137,7 @@ export default function CaregiverAppointmentDetailScreen({ route, navigation }: 
               { text: 'OK', onPress: () => navigation.goBack() }
             ]);
           } catch (error: any) {
-            console.error('[AppointmentDetail] Failed to decline:', error);
-            Alert.alert('Error', error.message || 'Failed to decline appointment');
+            handleError(error, 'decline-appointment');
           } finally {
             setLoading(false);
           }
@@ -133,6 +148,7 @@ export default function CaregiverAppointmentDetailScreen({ route, navigation }: 
 
   const handleStartCare = async () => {
     try {
+      clearError();
       setLoading(true);
       console.log('[AppointmentDetail] Starting care session:', appointment.id);
       console.log('[AppointmentDetail] Video call URL:', appointment.videoCallUrl);
@@ -182,8 +198,7 @@ export default function CaregiverAppointmentDetailScreen({ route, navigation }: 
         setStatus('In-Progress');
       }
     } catch (error: any) {
-      console.error('[AppointmentDetail] Failed to start session:', error);
-      Alert.alert('Error', error.message || 'Failed to start session');
+      handleError(error, 'start-care');
     } finally {
       setLoading(false);
     }
@@ -196,6 +211,7 @@ export default function CaregiverAppointmentDetailScreen({ route, navigation }: 
         text: "Yes, Complete",
         onPress: async () => {
           try {
+            clearError();
             setLoading(true);
             console.log('[AppointmentDetail] Completing appointment');
             console.log('[AppointmentDetail] Is video call:', appointment.isVideoCall);
@@ -221,8 +237,7 @@ export default function CaregiverAppointmentDetailScreen({ route, navigation }: 
               { text: 'OK', onPress: () => navigation.goBack() }
             ]);
           } catch (error: any) {
-            console.error('[AppointmentDetail] Failed to complete:', error);
-            Alert.alert('Error', error.message || 'Failed to complete job');
+            handleError(error, 'complete-job');
           } finally {
             setLoading(false);
           }
@@ -233,6 +248,7 @@ export default function CaregiverAppointmentDetailScreen({ route, navigation }: 
 
   const handleChat = async () => {
     try {
+      clearError();
       setLoading(true);
       console.log('[AppointmentDetail] Opening chat for:', appointment.recipient);
 
@@ -268,8 +284,7 @@ export default function CaregiverAppointmentDetailScreen({ route, navigation }: 
         );
       }
     } catch (e) {
-      console.error('Failed to open chat:', e);
-      Alert.alert('Error', 'Could not access chat');
+      handleError(e, 'open-chat');
     } finally {
       setLoading(false);
     }
@@ -284,9 +299,11 @@ export default function CaregiverAppointmentDetailScreen({ route, navigation }: 
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Details</Text>
         <TouchableOpacity>
-          <MaterialCommunityIcons name="dots-horizontal" size={24} color={THEME.text} />
+          <Icon name="dots-horizontal" size={24} color={THEME.text} />
         </TouchableOpacity>
       </View>
+
+      <ErrorBanner error={error} onDismiss={clearError} />
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
 
@@ -375,15 +392,15 @@ export default function CaregiverAppointmentDetailScreen({ route, navigation }: 
         <Text style={styles.sectionHeader}>CARE PLAN & NOTES</Text>
         <View style={styles.card}>
           <View style={styles.taskRow}>
-            <MaterialCommunityIcons name="checkbox-marked-circle-outline" size={20} color={THEME.primary} />
+            <Icon name="checkbox-marked-circle-outline" size={20} color={THEME.primary} />
             <Text style={styles.taskText}>Assist with morning medication</Text>
           </View>
           <View style={styles.taskRow}>
-            <MaterialCommunityIcons name="checkbox-blank-circle-outline" size={20} color={THEME.subText} />
+            <Icon name="checkbox-blank-circle-outline" size={20} color={THEME.subText} />
             <Text style={styles.taskText}>Light stretching exercises (15 mins)</Text>
           </View>
           <View style={styles.taskRow}>
-            <MaterialCommunityIcons name="checkbox-blank-circle-outline" size={20} color={THEME.subText} />
+            <Icon name="checkbox-blank-circle-outline" size={20} color={THEME.subText} />
             <Text style={styles.taskText}>Meal preparation (Lunch)</Text>
           </View>
         </View>
@@ -406,12 +423,12 @@ export default function CaregiverAppointmentDetailScreen({ route, navigation }: 
             </View>
           ) : status === 'Confirmed' ? (
             <TouchableOpacity style={styles.btnPrimary} onPress={handleStartCare}>
-              <MaterialCommunityIcons name="play-circle" size={20} color="#FFF" style={{ marginRight: 8 }} />
+              <Icon name="play-circle" size={20} color="#FFF" style={{ marginRight: 8 }} />
               <Text style={styles.btnPrimaryText}>Start Care Session</Text>
             </TouchableOpacity>
           ) : (
             <TouchableOpacity style={styles.btnSuccess} onPress={handleComplete}>
-              <MaterialCommunityIcons name="check-all" size={20} color="#FFF" style={{ marginRight: 8 }} />
+              <Icon name="check-all" size={20} color="#FFF" style={{ marginRight: 8 }} />
               <Text style={styles.btnPrimaryText}>Mark as Complete</Text>
             </TouchableOpacity>
           )}
@@ -484,4 +501,19 @@ const styles = StyleSheet.create({
   btnPrimary: { flexDirection: 'row', padding: 16, borderRadius: 12, backgroundColor: THEME.primary, alignItems: 'center', justifyContent: 'center' },
   btnSuccess: { flexDirection: 'row', padding: 16, borderRadius: 12, backgroundColor: '#059669', alignItems: 'center', justifyContent: 'center' },
   btnPrimaryText: { color: '#FFF', fontWeight: '700', fontSize: 16 },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EF4444',
+    padding: 10,
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderRadius: 8,
+  },
+  errorText: {
+    color: '#FFF',
+    marginLeft: 8,
+    flex: 1,
+    fontSize: 14,
+  },
 });

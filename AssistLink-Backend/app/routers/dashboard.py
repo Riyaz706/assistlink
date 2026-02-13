@@ -4,6 +4,7 @@ from typing import List, Optional
 from app.schemas import DashboardStats, BookingResponse
 from app.database import supabase, supabase_admin
 from app.dependencies import get_current_user
+from app.error_handler import DatabaseError
 
 router = APIRouter()
 
@@ -57,19 +58,53 @@ async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
         
         active_chat_sessions = len(chat_query.execute().data or [])
         
+        # Get caregiver profile stats if user is a caregiver
+        total_earnings = 0.0
+        avg_rating = 0.0
+        hourly_rate = 500.0 # Default fallback
+        
+        if role == "caregiver":
+            try:
+                profile_response = supabase_admin.table("caregiver_profile").select("avg_rating, hourly_rate").eq("user_id", user_id).execute()
+                if profile_response.data:
+                    profile = profile_response.data[0]
+                    avg_rating = profile.get("avg_rating", 0.0) or 0.0
+                    hourly_rate = profile.get("hourly_rate", 500.0) or 500.0
+            except Exception as e:
+                print(f"[WARN] Failed to fetch caregiver profile for stats: {e}")
+        
+        # Calculate earnings from completed payments
+        # We iterate over all_bookings (already fetched above)
+        if role == "caregiver":
+            for b in all_bookings:
+                # Check for completed payment
+                if b.get("payment_status") == "completed":
+                    amount = b.get("amount")
+                    if amount:
+                        total_earnings += float(amount)
+                    else:
+                        # Fallback if amount is missing but payment is completed
+                        duration = b.get("duration_hours", 0)
+                        total_earnings += float(duration) * hourly_rate
+                # Also check for completed bookings without explicit payment_status (legacy/manual)
+                elif b.get("status") == "completed" and not b.get("payment_status"):
+                    # For legacy completed bookings, assume paid? Or just skip?
+                    # Let's be conservative and only count explicit payments or if we want to be generous for display:
+                    # total_earnings += float(b.get("duration_hours", 0)) * hourly_rate
+                    pass
+        
         return DashboardStats(
             upcoming_bookings=upcoming_bookings,
             active_bookings=active_bookings,
             completed_bookings=completed_bookings,
             pending_video_calls=pending_video_calls,
-            active_chat_sessions=active_chat_sessions
+            active_chat_sessions=active_chat_sessions,
+            total_earnings=total_earnings,
+            avg_rating=avg_rating
         )
     
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise DatabaseError(str(e))
 
 
 @router.get("/bookings", response_model=List[dict])

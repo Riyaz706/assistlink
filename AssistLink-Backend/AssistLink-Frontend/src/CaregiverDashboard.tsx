@@ -18,6 +18,7 @@ import { useRoute, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from './context/AuthContext';
 import { useNotification } from './context/NotificationContext';
 import { api } from './api/client';
+import { useErrorHandler } from './hooks/useErrorHandler';
 
 const { width } = Dimensions.get('window');
 
@@ -64,13 +65,29 @@ const CaregiverDashboard = ({ navigation }: { navigation: any }) => {
   // Use global notification context
   const { assignments: upcomingAssignments, activeEmergency, loading: loadingAssignments, refresh } = useNotification();
 
+  const { handleError } = useErrorHandler();
+
   // Helper to determine if a tab is active
   const isActive = (screenName: string) => route?.name === screenName;
+
+  // Stats state
+  const [stats, setStats] = useState<{ total_earnings: number; avg_rating: number } | null>(null);
+
+  const fetchStats = async () => {
+    try {
+      const data = await api.getDashboardStats();
+      setStats(data as any);
+    } catch (error) {
+      console.log('Error fetching dashboard stats:', error);
+      // We don't necessarily want to show a full error screen for stats failure, just log it
+    }
+  };
 
   // Refresh when screen is focused
   useFocusEffect(
     React.useCallback(() => {
       refresh(true); // Silent refresh on focus
+      fetchStats();
     }, [])
   );
 
@@ -171,7 +188,7 @@ const CaregiverDashboard = ({ navigation }: { navigation: any }) => {
               Alert.alert("Success", "Test notification created. Check the bell icon!");
               refresh(true);
             } catch (e: any) {
-              Alert.alert("Error", e.message || "Failed to create test notification");
+              handleError(e, 'test-notification');
             }
           }}
         >
@@ -187,7 +204,7 @@ const CaregiverDashboard = ({ navigation }: { navigation: any }) => {
               <Text style={styles.statLabel}>Earnings</Text>
             </View>
             <View style={styles.statValueRow}>
-              <Text style={styles.statValue}>₹0</Text>
+              <Text style={styles.statValue}>₹{stats?.total_earnings || 0}</Text>
             </View>
           </View>
           <View style={styles.statCard}>
@@ -196,7 +213,7 @@ const CaregiverDashboard = ({ navigation }: { navigation: any }) => {
               <Text style={styles.statLabel}>Rating</Text>
             </View>
             <View style={styles.statValueRow}>
-              <Text style={styles.statValue}>0</Text>
+              <Text style={styles.statValue}>{stats?.avg_rating?.toFixed(1) || "0.0"}</Text>
             </View>
           </View>
         </View>
@@ -309,7 +326,7 @@ const CaregiverDashboard = ({ navigation }: { navigation: any }) => {
           </TouchableOpacity>
         </View>
       </RNSafeAreaView>
-    </RNSafeAreaView>
+    </RNSafeAreaView >
   );
 };
 

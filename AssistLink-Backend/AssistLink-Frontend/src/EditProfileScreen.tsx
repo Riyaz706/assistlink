@@ -36,10 +36,13 @@ const THEME = {
   error: '#EF4444',
 };
 
+import { useErrorHandler } from './hooks/useErrorHandler';
+
 export default function EditProfileScreen({ navigation, route }: any) {
   const { user, refreshUser } = useAuth();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const { handleError, error, clearError } = useErrorHandler();
 
   // User profile fields
   const [fullName, setFullName] = useState('');
@@ -63,8 +66,9 @@ export default function EditProfileScreen({ navigation, route }: any) {
   }, []);
 
   const pickImage = async () => {
+    clearError();
     if (!ImagePicker) {
-      Alert.alert('Not Available', 'Image picker is only available on mobile devices.');
+      handleError(new Error('Image picker is only available on mobile devices.'), 'feature-unavailable');
       return;
     }
 
@@ -74,7 +78,7 @@ export default function EditProfileScreen({ navigation, route }: any) {
       // Request permissions
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'We need camera roll permissions to select an image.');
+        handleError(new Error('We need camera roll permissions to select an image.'), 'permission-denied');
         setUploadingImage(false);
         return;
       }
@@ -100,8 +104,7 @@ export default function EditProfileScreen({ navigation, route }: any) {
         );
       }
     } catch (error: any) {
-      console.error('Error picking image:', error);
-      Alert.alert('Error', 'Failed to pick image. Please try again.');
+      handleError(error, 'image-picker');
     } finally {
       setUploadingImage(false);
     }
@@ -109,6 +112,7 @@ export default function EditProfileScreen({ navigation, route }: any) {
 
   const loadProfile = async () => {
     setLoading(true);
+    clearError();
     try {
       // Load user profile
       const profile: any = await api.getProfile();
@@ -155,8 +159,7 @@ export default function EditProfileScreen({ navigation, route }: any) {
         }
       }
     } catch (error: any) {
-      console.error('Error loading profile:', error);
-      Alert.alert('Error', 'Failed to load profile. Please try again.');
+      handleError(error, 'profile-load');
     } finally {
       setLoading(false);
     }
@@ -164,6 +167,7 @@ export default function EditProfileScreen({ navigation, route }: any) {
 
   const handleSave = async () => {
     setSaving(true);
+    clearError();
     try {
       // Update user profile
       const updateData: any = {
@@ -254,8 +258,7 @@ export default function EditProfileScreen({ navigation, route }: any) {
         { text: 'OK', onPress: () => navigation.goBack() },
       ]);
     } catch (error: any) {
-      console.error('Error saving profile:', error);
-      Alert.alert('Error', error.message || 'Failed to update profile. Please try again.');
+      handleError(error, 'profile-save');
     } finally {
       setSaving(false);
     }
@@ -290,6 +293,11 @@ export default function EditProfileScreen({ navigation, route }: any) {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {error && (
+          <View style={{ marginBottom: 20, padding: 12, backgroundColor: '#FEF2F2', borderRadius: 8 }}>
+            <Text style={{ color: '#DC2626' }}>{error.message}</Text>
+          </View>
+        )}
         {/* Personal Information */}
         <Text style={styles.sectionTitle}>Personal Information</Text>
         <View style={styles.sectionCard}>

@@ -8,6 +8,7 @@ import React, {
 import * as SecureStore from "expo-secure-store";
 import { api, setAccessToken } from "../api/client";
 import { Platform } from "react-native";
+import * as Sentry from "@sentry/react-native";
 
 type User = any;
 
@@ -110,6 +111,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             if (isMounted) {
               console.log("AuthContext: User profile restored:", (me as any)?.email || (me as any)?.full_name || "Unknown");
               setUser(me as any);
+
+              // Tag user in Sentry
+              Sentry.setUser({
+                id: (me as any).id,
+                email: (me as any).email,
+                username: (me as any).full_name,
+              });
             }
           } catch (meError: any) {
             // If token is invalid (401), clear it
@@ -169,6 +177,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         const me = await api.me();
         console.log("AuthContext: User profile fetched:", (me as any)?.email || (me as any)?.full_name || "Unknown");
         setUser(me as any);
+
+        // Tag user in Sentry
+        Sentry.setUser({
+          id: (me as any).id || res.user?.id,
+          email: (me as any).email || email,
+          username: (me as any).full_name,
+        });
       } catch (meError: any) {
         console.error("AuthContext: Failed to fetch user profile after login:", meError);
         // Even if fetching profile fails, we have the token, so set a minimal user object
@@ -211,6 +226,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setAccessToken(null);
       setUser(null);
 
+      // Clear user in Sentry
+      Sentry.setUser(null);
+
       // Then clear token in background (non-blocking)
       clearToken().catch((error) => {
         console.warn("AuthContext: Error clearing token (non-critical):", error);
@@ -223,6 +241,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setAccessTokenState(null);
       setAccessToken(null);
       setUser(null);
+
+      // Clear user in Sentry
+      Sentry.setUser(null);
     }
   };
 

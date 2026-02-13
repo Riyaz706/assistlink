@@ -2,7 +2,13 @@ from fastapi import APIRouter, HTTPException, status, Depends
 from typing import Optional, Dict, Any
 from app.database import supabase_admin
 from app.dependencies import get_current_user
-from app.services.notifications import notify_new_message, create_notification
+from app.services.notifications import (
+    notify_new_message, 
+    create_notification,
+    notify_emergency_alert,
+    notify_emergency_acknowledged
+)
+from app.error_handler import DatabaseError
 from datetime import datetime, timezone
 import sys
 
@@ -47,17 +53,11 @@ async def trigger_emergency(
         for caregiver_id in caregiver_ids:
             try:
                 print(f"[DEBUG] Creating notification for caregiver: {caregiver_id}", file=sys.stderr, flush=True)
-                res = await create_notification(
-                    user_id=caregiver_id,
-                    notification_type="emergency",
-                    title="🚨 EMERGENCY ALERT 🚨",
-                    body=f"EMERGENCY: {user_name} has triggered an SOS alert! Please check on them immediately.",
-                    data={
-                        "care_recipient_id": str(user_id),
-                        "care_recipient_name": user_name,
-                        "location": location_data,
-                        "action": "view_emergency"
-                    }
+                res = await notify_emergency_alert(
+                    caregiver_id=caregiver_id,
+                    care_recipient_name=user_name,
+                    emergency_id=str(user_id),  # Using user_id as emergency identifier
+                    location=location_data
                 )
                 if res:
                     print(f"✅ Notification created in DB for {caregiver_id}", file=sys.stderr, flush=True)
@@ -75,7 +75,4 @@ async def trigger_emergency(
 
     except Exception as e:
         print(f"❌ Error triggering emergency: {e}", file=sys.stderr, flush=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to trigger emergency: {str(e)}"
-        )
+        raise DatabaseError(f"Failed to trigger emergency: {str(e)}")

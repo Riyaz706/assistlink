@@ -1,15 +1,27 @@
-import React from 'react';
-import { Platform } from 'react-native';
+Sentry.init({
+  dsn: "https://examplePublicKey@o0.ingest.sentry.io/0", // Replace with real DSN
+  debug: __DEV__,
+  enabled: !__DEV__, // Only enable in production or specifically for testing
+  tracesSampleRate: 1.0,
+  integrations: [
+    new Sentry.ReactNativeTracing({
+      routingInstrumentation: new Sentry.ReactNavigationInstrumentation(),
+    }),
+  ],
+});
 import { NavigationContainer } from '@react-navigation/native';
+const routingInstrumentation = new Sentry.ReactNavigationInstrumentation();
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { useNotifications } from './src/hooks/useNotifications';
+import ErrorBoundary from './src/components/ErrorBoundary';
 
 // --- IMPORTS ---
 // --- IMPORTS ---
 import { navigationRef } from './src/navigation/RootNavigation';
 import { NotificationProvider } from './src/context/NotificationContext';
+import { OfflineProvider } from './src/context/OfflineContext';
 import * as Linking from 'expo-linking';
 import SplashScreen from './src/SplashScreen';
 import RegisterScreen from './src/RegisterScreen';
@@ -128,7 +140,7 @@ function RootNavigator() {
   );
 }
 
-export default function App() {
+function App() {
   const linking = {
     prefixes: [Linking.createURL('/')],
     config: {
@@ -140,13 +152,25 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <AuthProvider>
-        <NotificationProvider>
-          <NavigationContainer ref={navigationRef} linking={linking}>
-            <RootNavigator />
-          </NavigationContainer>
-        </NotificationProvider>
-      </AuthProvider>
+      <ErrorBoundary>
+        <AuthProvider>
+          <NotificationProvider>
+            <OfflineProvider>
+              <NavigationContainer
+                ref={navigationRef}
+                linking={linking}
+                onReady={() => {
+                  routingInstrumentation.registerNavigationContainer(navigationRef);
+                }}
+              >
+                <RootNavigator />
+              </NavigationContainer>
+            </OfflineProvider>
+          </NotificationProvider>
+        </AuthProvider>
+      </ErrorBoundary>
     </SafeAreaProvider>
   );
 }
+
+export default Sentry.wrap(App);

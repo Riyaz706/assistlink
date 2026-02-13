@@ -6,7 +6,7 @@ function getApiBaseUrl(): string {
     const Constants = require('expo-constants').default;
     const fromExtra = Constants.expoConfig?.extra?.apiBaseUrl || Constants.expoConfig?.extra?.EXPO_PUBLIC_API_BASE_URL;
     if (fromExtra) return String(fromExtra).replace(/\/$/, '');
-  } catch {}
+  } catch { }
   return 'https://assistlink-nd65.onrender.com';
 }
 const API_BASE_URL = getApiBaseUrl();
@@ -20,6 +20,14 @@ let accessToken: string | null = null;
 
 export function setAccessToken(token: string | null) {
   accessToken = token;
+}
+
+// Offline handling integration
+type OfflineHandler = (path: string, options: RequestInit) => Promise<any>;
+let offlineHandler: OfflineHandler | null = null;
+
+export function setOfflineHandler(handler: OfflineHandler | null) {
+  offlineHandler = handler;
 }
 
 // Helper to get token from storage (for web)
@@ -59,31 +67,67 @@ async function request<T>(
   const url = `${API_BASE_URL}${path}`;
   console.log(`[API] Making ${options.method || 'GET'} request to: ${url}`);
 
+  // Set timeout for requests (30 seconds)
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+
   try {
     const res = await fetch(url, {
       ...options,
       headers,
+      signal: controller.signal,
     });
 
+    clearTimeout(timeoutId);
+
     console.log(`[API] Response received: ${res.status} ${res.statusText} for ${path}`);
+
+    // Get request ID from response headers for debugging
+    const requestId = res.headers.get('X-Request-ID');
+    if (requestId) {
+      console.log(`[API] Request ID: ${requestId}`);
+    }
 
     const text = await res.text();
 
     if (!res.ok) {
-      let message = text || `Request failed with status ${res.status}`;
+      let errorMessage = text || `Request failed with status ${res.status}`;
+      let errorCode = `HTTP_${res.status}`;
+      let errorDetails = null;
+
       try {
         const json = JSON.parse(text);
-        if (json.detail) {
-          message = typeof json.detail === "string" ? json.detail : JSON.stringify(json.detail);
+
+        // Handle new standardized error format
+        if (json.error) {
+          errorMessage = json.error.message || errorMessage;
+          errorCode = json.error.code || errorCode;
+          errorDetails = json.error.details;
+        }
+        // Handle legacy format
+        else if (json.detail) {
+          errorMessage = typeof json.detail === "string" ? json.detail : JSON.stringify(json.detail);
         }
       } catch {
         // ignore JSON parse error, keep text
       }
 
-      // Add diagnostic info to error message
-      const diagnosticMsg = `API Error [${res.status}] at ${url}: ${message}`;
+      // Create enhanced error object
+      const error: any = new Error(errorMessage);
+      error.statusCode = res.status;
+      error.code = errorCode;
+      error.details = errorDetails;
+      error.requestId = requestId;
+
+      // Add diagnostic info
+      const diagnosticMsg = `API Error [${res.status}${requestId ? ` - ${requestId}` : ''}] at ${url}: ${errorMessage}`;
       console.error(`[API] ${diagnosticMsg}`);
-      throw new Error(diagnosticMsg);
+
+      if (errorDetails) {
+        console.error(`[API] Error details:`, errorDetails);
+      }
+
+      throw error;
     }
 
     if (!text) {
@@ -93,21 +137,67 @@ async function request<T>(
 
     return JSON.parse(text) as T;
   } catch (error: any) {
-    console.error(`[API] Request failed for ${path}:`, error);
+    clearTimeout(timeoutId);
 
-    // Handle network errors
-    if (error.message && (error.message.includes('Failed to fetch') || error.message.includes('NetworkError'))) {
-      const errorMsg = `Network error: Unable to connect to the server at ${API_BASE_URL}. Please check your internet connection and ensure the server is running.`;
-      console.error(`[API] ${errorMsg}`);
-      throw new Error(errorMsg);
+    // Handle abort/timeout
+    if (error.name === 'AbortError') {
+      const timeoutError: any = new Error('Request timeout. Please check your internet connection and try again.');
+      timeoutError.code = 'TIMEOUT';
+      timeoutError.statusCode = 408;
+      console.error(`[API] Request timeout for ${path}`);
+      throw timeoutError;
     }
 
-    // Re-throw other errors as-is
+    // Handle network errors and offline queueing
+    const isNetwork = error.message && (
+      error.message.includes('Failed to fetch') ||
+      error.message.includes('NetworkError') ||
+      error.message.includes('Network request failed') ||
+      error.message.includes('Unable to connect to the server')
+    );
+
+    if (isNetwork) {
+      console.error(`[API] Network error for ${path}`);
+
+      const method = options.method || 'GET';
+      if (offlineHandler && isSyncable(path, method)) {
+        console.log(`[API] Network error caught, attempting to queue syncable request: ${method} ${path}`);
+        try {
+          await offlineHandler(path, options);
+          return { queued: true, status: 'pending' } as any;
+        } catch (queueError) {
+          console.error('[API] Failed to queue request:', queueError);
+        }
+      }
+
+      const networkError: any = new Error(`Network error: Unable to connect to the server. Please check your internet connection.`);
+      networkError.code = 'NETWORK_ERROR';
+      networkError.originalError = error;
+      throw networkError;
+    }
+
+    // Re-throw other errors as-is (they already have enhanced info if from !res.ok block)
     throw error;
   }
 }
 
+// Define which endpoints are "syncable" offline
+const SYNCABLE_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE'];
+const SYNCABLE_PATHS = [
+  '/api/bookings',
+  '/api/chat/sessions',
+  '/api/caregivers/profile',
+  '/api/notifications/devices'
+];
+
+function isSyncable(path: string, method: string): boolean {
+  if (!SYNCABLE_METHODS.includes(method.toUpperCase())) return false;
+  return SYNCABLE_PATHS.some(p => path.startsWith(p));
+}
+
 export const api = {
+  // Expose raw request for internal use (like syncing)
+  request,
   // Authentication
   register: (payload: {
     email: string;
@@ -308,7 +398,21 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  updateBooking: (bookingId: string, data: { status?: string;[key: string]: any }) =>
+    request(`/api/bookings/${bookingId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  cancelBooking: (bookingId: string) =>
+    request(`/api/bookings/${bookingId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "cancelled" }),
+    }),
+
   // Dashboard
+  getDashboardStats: () => request("/api/dashboard/stats"),
+
   getDashboardBookings: (params: {
     status?: string;
     is_recurring?: boolean;
@@ -351,6 +455,7 @@ export const api = {
       currency: string;
       key_id: string;
       booking_id: string;
+      chat_session_id?: string;
     }>("/api/payments/create-order", {
       method: "POST",
       body: JSON.stringify(data),
@@ -365,6 +470,7 @@ export const api = {
       success: boolean;
       message: string;
       booking_id?: string;
+      chat_session_id?: string;
     }>("/api/payments/verify", {
       method: "POST",
       body: JSON.stringify(data),

@@ -18,6 +18,8 @@ import { useAuth } from './context/AuthContext';
 import { api } from './api/client';
 import { useFocusEffect } from '@react-navigation/native';
 
+import { useErrorHandler } from './hooks/useErrorHandler';
+
 // --- THEME COLORS ---
 const THEME = {
   bg: "#F5F7FA",
@@ -28,7 +30,9 @@ const THEME = {
   danger: "#EF4444",
   dangerBg: "#FEF2F2",
   iconBg: "#E0F2F1",
-  divider: "#E5E7EB"
+  divider: "#E5E7EB",
+  error: "#EF4444",
+  errorBg: "#FEF2F2"
 };
 
 export default function ProfileScreen2({ navigation }: any) {
@@ -40,35 +44,40 @@ export default function ProfileScreen2({ navigation }: any) {
   const [isQualModalVisible, setIsQualModalVisible] = useState(false);
   const { user, logout, refreshUser } = useAuth();
 
+  const { handleError, error, clearError } = useErrorHandler();
+
   const fullName = profile?.full_name || user?.full_name || 'Caregiver';
 
   // Fetch status on focus
   useFocusEffect(
     React.useCallback(() => {
       loadAvailabilityStatus();
+      return () => clearError();
     }, [])
   );
 
   const loadAvailabilityStatus = async () => {
     try {
+      clearError();
       const profile: any = await api.getCaregiverProfile();
       setCaregiverProfileData(profile);
       if (profile?.availability_status) {
         setAvailabilityStatus(profile.availability_status);
       }
     } catch (e) {
-      console.error("Failed to fetch availability status:", e);
+      handleError(e, 'load-profile-status');
     }
   };
 
   const handleStatusChange = async (newStatus: string) => {
     setLoadingAvailability(true);
     try {
+      clearError();
       const updatedProfile: any = await api.updateCaregiverProfile({ availability_status: newStatus });
       setAvailabilityStatus(updatedProfile.availability_status);
       setCaregiverProfileData(updatedProfile);
     } catch (e) {
-      console.error("Update status failed:", e);
+      handleError(e, 'update-status');
     } finally {
       setLoadingAvailability(false);
     }
@@ -104,6 +113,17 @@ export default function ProfileScreen2({ navigation }: any) {
           <Text style={styles.helpText}>Help</Text>
         </TouchableOpacity>
       </View>
+
+      {/* ERROR BANNER */}
+      {error && (
+        <View style={styles.errorBanner}>
+          <MaterialCommunityIcons name="alert-circle" size={20} color={THEME.error} />
+          <Text style={styles.errorText}>{error.message}</Text>
+          <TouchableOpacity onPress={clearError}>
+            <MaterialCommunityIcons name="close" size={20} color={THEME.error} />
+          </TouchableOpacity>
+        </View>
+      )}
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
@@ -527,5 +547,23 @@ const styles = StyleSheet.create({
   addQualBtnText: {
     color: '#FFF',
     fontWeight: 'bold',
+  },
+  errorBanner: {
+    backgroundColor: THEME.errorBg,
+    marginHorizontal: 20,
+    marginBottom: 15,
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FAC8C8',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  errorText: {
+    color: THEME.error,
+    flex: 1,
+    marginLeft: 8,
+    fontSize: 14,
   },
 });

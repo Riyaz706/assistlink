@@ -15,6 +15,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAuth } from './context/AuthContext';
 import { api } from './api/client';
 import { useFocusEffect } from '@react-navigation/native';
+import { useErrorHandler } from './hooks/useErrorHandler';
 
 // --- IMPORT BOTTOM NAV ---
 // Make sure this path matches your project structure
@@ -39,22 +40,25 @@ export default function ProfileScreen({ navigation }: any) {
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState<any>(null);
   const { user, logout, refreshUser } = useAuth();
+  const { handleError, error, clearError } = useErrorHandler();
 
   // Load profile data when screen is focused
   useFocusEffect(
     React.useCallback(() => {
       loadProfile();
+      return () => clearError();
     }, [user])
   );
 
   const loadProfile = async () => {
     if (!user) return;
     setLoading(true);
+    clearError();
     try {
       const profileData = await api.getProfile();
       setProfile(profileData);
     } catch (error) {
-      console.error('Error loading profile:', error);
+      handleError(error, 'profile-load');
     } finally {
       setLoading(false);
     }
@@ -88,6 +92,10 @@ export default function ProfileScreen({ navigation }: any) {
     </TouchableOpacity>
   );
 
+  // Re-define SettingsItem to fix the icon name bug in the original code if any, 
+  // but looking at original, it passed 'icon' prop to name. 
+  // Restoring original component logic but inside the function scope.
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle="dark-content" backgroundColor={THEME.bg} />
@@ -100,6 +108,19 @@ export default function ProfileScreen({ navigation }: any) {
           <Text style={styles.helpText}>Help</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Error Banner */}
+      {error && (
+        <View style={styles.errorContainer}>
+          <MaterialCommunityIcons name="alert-circle" size={20} color="#FFF" />
+          <Text style={styles.errorText} numberOfLines={2}>
+            {error.message || "An error occurred"}
+          </Text>
+          <TouchableOpacity onPress={clearError}>
+            <MaterialCommunityIcons name="close" size={20} color="#FFF" />
+          </TouchableOpacity>
+        </View>
+      )}
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
@@ -217,10 +238,10 @@ export default function ProfileScreen({ navigation }: any) {
           style={styles.logoutBtn}
           onPress={async () => {
             try {
+              clearError();
               await logout();
             } catch (error) {
-              console.error("Logout error:", error);
-              // Force logout even if there's an error
+              handleError(error, 'logout');
             }
           }}
         >
@@ -247,6 +268,25 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: THEME.bg,
+  },
+  // Error Styles
+  errorContainer: {
+    backgroundColor: '#EF4444',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    marginHorizontal: 20,
+    marginTop: 10,
+    borderRadius: 8,
+  },
+  errorText: {
+    color: '#FFF',
+    flex: 1,
+    marginHorizontal: 8,
+    fontSize: 13,
+    fontWeight: '500',
   },
   header: {
     flexDirection: 'row',

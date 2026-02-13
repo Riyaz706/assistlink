@@ -385,3 +385,96 @@ async def notify_video_call_joined(user_id: str, other_party_name: str, video_ca
             "action": "join_call" 
         }
     )
+
+
+async def notify_booking_reminder(user_id: str, other_party_name: str, booking_id: str, role: str, start_time: str):
+    """Send booking reminder 1 hour before start time"""
+    return await create_notification(
+        user_id=user_id,
+        notification_type="booking_reminder",
+        title="Upcoming Booking",
+        body=f"Your booking with {other_party_name} starts in 1 hour at {start_time}",
+        data={
+            "booking_id": booking_id,
+            "role": role,
+            "action": "view_booking"
+        }
+    )
+
+
+async def notify_emergency_alert(caregiver_id: str, care_recipient_name: str, emergency_id: str, location: dict = None):
+    """Notify caregiver of emergency SOS - HIGH PRIORITY"""
+    location_text = ""
+    if location:
+        lat = location.get("latitude", "")
+        lng = location.get("longitude", "")
+        if lat and lng:
+            location_text = f" at location ({lat}, {lng})"
+    
+    return await create_notification(
+        user_id=caregiver_id,
+        notification_type="emergency",
+        title="🚨 Emergency Alert",
+        body=f"{care_recipient_name} triggered an emergency SOS!{location_text}",
+        data={
+            "emergency_id": emergency_id,
+            "care_recipient_name": care_recipient_name,
+            "location": location or {},
+            "action": "view_emergency",
+            "priority": "high"
+        }
+    )
+
+
+async def notify_emergency_acknowledged(care_recipient_id: str, caregiver_name: str, emergency_id: str):
+    """Notify care recipient that caregiver acknowledged the emergency"""
+    return await create_notification(
+        user_id=care_recipient_id,
+        notification_type="emergency",
+        title="Help is Coming",
+        body=f"{caregiver_name} acknowledged your emergency alert and is responding",
+        data={
+            "emergency_id": emergency_id,
+            "caregiver_name": caregiver_name,
+            "action": "view_emergency"
+        }
+    )
+
+
+async def notify_payment_success(user_id: str, amount: float, payment_id: str, other_party_name: str, is_sender: bool):
+    """Notify about successful payment"""
+    if is_sender:
+        title = "Payment Confirmed"
+        body = f"Payment of ${amount:.2f} to {other_party_name} processed successfully"
+    else:
+        title = "Payment Received"
+        body = f"You received ${amount:.2f} from {other_party_name}"
+    
+    return await create_notification(
+        user_id=user_id,
+        notification_type="payment",
+        title=title,
+        body=body,
+        data={
+            "payment_id": payment_id,
+            "amount": amount,
+            "is_sender": is_sender,
+            "action": "view_payment"
+        }
+    )
+
+
+async def notify_payment_received(caregiver_id: str, amount: float, care_recipient_name: str, payment_id: str):
+    """Notify caregiver of payment received"""
+    return await create_notification(
+        user_id=caregiver_id,
+        notification_type="payment",
+        title="Payment Received",
+        body=f"You received ${amount:.2f} from {care_recipient_name}",
+        data={
+            "payment_id": payment_id,
+            "amount": amount,
+            "care_recipient_name": care_recipient_name,
+            "action": "view_payment"
+        }
+    )

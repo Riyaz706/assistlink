@@ -25,29 +25,34 @@ const THEME = {
     error: '#EF4444',
 };
 
+import { useErrorHandler } from './hooks/useErrorHandler';
+
 export default function ResetPasswordScreen({ route, navigation }: any) {
     const [newPassword, setNewPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
     const { updatePassword } = useAuth();
+    const { handleError, error, clearError } = useErrorHandler();
 
     // In a real flow, the token would be handled by AuthContext or Supabase implicitly
     // after the deep link sets the session.
 
     const handleResetPassword = async () => {
+        clearError();
+
         if (!newPassword || !confirmPassword) {
-            Alert.alert('Error', 'Please fill in all fields');
+            handleError(new Error('Please fill in all fields'), 'validation');
             return;
         }
 
         if (newPassword.length < 6) {
-            Alert.alert('Error', 'Password must be at least 6 characters long');
+            handleError(new Error('Password must be at least 6 characters long'), 'validation');
             return;
         }
 
         if (newPassword !== confirmPassword) {
-            Alert.alert('Error', 'Passwords do not match');
+            handleError(new Error('Passwords do not match'), 'validation');
             return;
         }
 
@@ -61,8 +66,7 @@ export default function ResetPasswordScreen({ route, navigation }: any) {
                 { text: 'OK', onPress: () => navigation.navigate('Login') }
             ]);
         } catch (error: any) {
-            console.error('Password reset failed:', error);
-            Alert.alert('Error', error.message || 'Failed to reset password. The link might have expired.');
+            handleError(error, 'reset-password');
         } finally {
             setLoading(false);
         }
@@ -90,6 +94,12 @@ export default function ResetPasswordScreen({ route, navigation }: any) {
                     <Text style={styles.description}>
                         Create a new password for your account. Choose a strong password that you haven't used before.
                     </Text>
+
+                    {error && (
+                        <View style={{ marginBottom: 20, padding: 12, backgroundColor: '#FEF2F2', borderRadius: 8, width: '100%' }}>
+                            <Text style={{ color: '#DC2626', textAlign: 'center' }}>{error.message}</Text>
+                        </View>
+                    )}
 
                     <View style={styles.form}>
                         <Text style={styles.label}>New Password</Text>

@@ -21,9 +21,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import BottomNav from './BottomNav'; 
+import BottomNav from './BottomNav';
 import { useAuth } from './context/AuthContext';
 import { api } from './api/client';
+import { useErrorHandler } from './hooks/useErrorHandler';
 
 // --- TYPES ---
 import { useNavigation, NavigationProp } from '@react-navigation/native';
@@ -44,16 +45,16 @@ type RootStackParamList = {
   // add others if needed
 };
 
-const GREEN = "#059669"; 
-const RED = "#EF4444"; 
+const GREEN = "#059669";
+const RED = "#EF4444";
 const SWIPE_HEIGHT = 56;
 const SCREEN_WIDTH = Dimensions.get('window').width;
-const BUTTON_WIDTH = SCREEN_WIDTH - 32; 
+const BUTTON_WIDTH = SCREEN_WIDTH - 32;
 
 // ... [SosSwipeButton code remains the same] ...
 const SosSwipeButton = ({ onSwipeSuccess }: { onSwipeSuccess: () => void }) => {
   const translateX = useRef(new Animated.Value(0)).current;
-  const MAX_SLIDE = BUTTON_WIDTH - 50 - 10; 
+  const MAX_SLIDE = BUTTON_WIDTH - 50 - 10;
 
   const panResponder = useRef(
     PanResponder.create({
@@ -111,12 +112,13 @@ const CareRecipientDashboard = () => {
   // Use the typed navigation hook
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const { user, refreshUser } = useAuth();
+  const { handleError } = useErrorHandler();
 
   // --- STATE ---
   const [currentDate, setCurrentDate] = useState("");
-  const [greeting, setGreeting] = useState("Good Morning"); 
+  const [greeting, setGreeting] = useState("Good Morning");
   // Show modal only if emergency contact is not set
-  const [showSosModal, setShowSosModal] = useState(false); 
+  const [showSosModal, setShowSosModal] = useState(false);
   const [caretakerName, setCaretakerName] = useState("");
   const [caretakerPhone, setCaretakerPhone] = useState("");
   const [currentBookings, setCurrentBookings] = useState<any[]>([]);
@@ -127,14 +129,14 @@ const CareRecipientDashboard = () => {
     try {
       setLoadingBookings(true);
       // Load all bookings (no status filter) to get pending, accepted, and in_progress
-      const bookings = await api.getDashboardBookings({ 
-        limit: 10 
+      const bookings = await api.getDashboardBookings({
+        limit: 10
       });
       // Filter to only show active bookings (pending payment, accepted, or in_progress - not completed)
-      const active = (bookings || []).filter((b: any) => 
+      const active = ((bookings as any[]) || []).filter((b: any) =>
         b.status === 'pending' || b.status === 'accepted' || b.status === 'in_progress'
       );
-      
+
       // Remove duplicates - keep only the most recent booking for each caregiver
       const uniqueBookings = active.reduce((acc: any[], booking: any) => {
         const caregiverId = booking.caregiver_id || booking.caregiver?.id;
@@ -142,12 +144,12 @@ const CareRecipientDashboard = () => {
           acc.push(booking);
           return acc;
         }
-        
+
         // Check if we already have a booking for this caregiver
-        const existingIndex = acc.findIndex((b: any) => 
+        const existingIndex = acc.findIndex((b: any) =>
           (b.caregiver_id || b.caregiver?.id) === caregiverId
         );
-        
+
         if (existingIndex === -1) {
           // No existing booking for this caregiver, add it
           acc.push(booking);
@@ -156,19 +158,22 @@ const CareRecipientDashboard = () => {
           const existing = acc[existingIndex];
           const existingDate = existing.scheduled_date ? new Date(existing.scheduled_date) : new Date(0);
           const newDate = booking.scheduled_date ? new Date(booking.scheduled_date) : new Date(0);
-          
+
           if (newDate > existingDate) {
             // Replace with newer booking
             acc[existingIndex] = booking;
           }
         }
-        
+
         return acc;
       }, []);
-      
+
       setCurrentBookings(uniqueBookings);
     } catch (e: any) {
-      console.error("Failed to load current bookings:", e);
+      // For dashboard loading, we might want silent error or a toast, 
+      // but for now let's just log it or use handleError without alert if preferred.
+      // Using handleError so it handles auth errors (redirect to login) if any.
+      handleError(e, 'load-bookings');
     } finally {
       setLoadingBookings(false);
     }
@@ -177,8 +182,8 @@ const CareRecipientDashboard = () => {
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
-      const options: Intl.DateTimeFormatOptions = { 
-        weekday: 'long', month: 'short', day: 'numeric' 
+      const options: Intl.DateTimeFormatOptions = {
+        weekday: 'long', month: 'short', day: 'numeric'
       };
       const dateString = now.toLocaleDateString('en-US', options).toUpperCase();
       setCurrentDate(dateString);
@@ -225,9 +230,10 @@ const CareRecipientDashboard = () => {
       console.log("Complete booking API call succeeded for booking:", bookingId);
       await loadCurrentBookings(); // Reload bookings after completion
       Alert.alert("Success", "Booking marked as completed! The caregiver is now available for other requests.");
+      await loadCurrentBookings(); // Reload bookings after completion
+      Alert.alert("Success", "Booking marked as completed! The caregiver is now available for other requests.");
     } catch (e: any) {
-      console.error("Failed to mark booking as completed:", e);
-      Alert.alert("Error", e?.message || "Failed to mark booking as completed. Please try again.");
+      handleError(e, 'mark-completed');
     }
   };
 
@@ -257,17 +263,19 @@ const CareRecipientDashboard = () => {
           phone: caretakerPhone.trim()
         }
       });
-      
+
       // Refresh user data to get updated emergency contact
       if (refreshUser) {
         await refreshUser();
       }
-      
+
+      setShowSosModal(false);
+      Alert.alert("Success", "Emergency contact saved successfully!");
       setShowSosModal(false);
       Alert.alert("Success", "Emergency contact saved successfully!");
     } catch (e: any) {
-      console.error("Failed to save emergency contact:", e);
-      Alert.alert("Error", e?.message || "Failed to save emergency contact. Please try again.");
+      handleError(e, 'save-contact');
+      // Alert.alert("Error", e?.message || "Failed to save emergency contact. Please try again.");
     }
   };
 
@@ -277,7 +285,7 @@ const CareRecipientDashboard = () => {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="dark-content" backgroundColor="#F6FAF5" />
-      
+
       {/* --- SOS CONFIGURATION MODAL --- */}
       <Modal
         transparent={true}
@@ -287,12 +295,12 @@ const CareRecipientDashboard = () => {
       >
         <View style={styles.modalOverlay}>
           <Pressable onPress={Keyboard.dismiss} style={styles.modalOverlayTouchable} />
-          <KeyboardAvoidingView 
+          <KeyboardAvoidingView
             behavior={Platform.OS === "ios" ? "padding" : "height"}
             style={styles.keyboardView}
           >
             <Animated.View style={[styles.modalContent, { transform: [{ scale: scaleValue }] }]}>
-              
+
               <TouchableOpacity style={styles.closeBtn} onPress={handleCloseModal}>
                 <Icon name="close" size={20} color="#999" />
               </TouchableOpacity>
@@ -305,7 +313,7 @@ const CareRecipientDashboard = () => {
               </View>
 
               <Text style={styles.modalDesc}>
-                Please enter your emergency contact's name and mobile number. This contact does not need to be a user of this app. We will use this for <Text style={{fontWeight:'700', color: RED}}>SOS</Text> emergency calls.
+                Please enter your emergency contact's name and mobile number. This contact does not need to be a user of this app. We will use this for <Text style={{ fontWeight: '700', color: RED }}>SOS</Text> emergency calls.
               </Text>
 
               <View style={styles.inputContainer}>
@@ -348,17 +356,17 @@ const CareRecipientDashboard = () => {
       </Modal>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
-        
+
         {/* HEADER */}
         <View style={styles.headerRow}>
           <View>
-            <Text style={styles.date}>{currentDate}</Text> 
+            <Text style={styles.date}>{currentDate}</Text>
             <Text style={styles.heading}>
               {greeting}, {firstName}
             </Text>
           </View>
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={styles.bell}
             onPress={() => navigation.navigate('Notifications')}
           >
@@ -368,8 +376,8 @@ const CareRecipientDashboard = () => {
         </View>
 
         {/* PROFILE CARD */}
-        <TouchableOpacity 
-          style={styles.profileCard} 
+        <TouchableOpacity
+          style={styles.profileCard}
           activeOpacity={0.7}
           onPress={() => navigation.navigate('Profile')}
         >
@@ -401,8 +409,8 @@ const CareRecipientDashboard = () => {
         </TouchableOpacity>
 
         {/* REQUEST CARE BUTTON */}
-        <TouchableOpacity 
-          style={styles.requestBtn} 
+        <TouchableOpacity
+          style={styles.requestBtn}
           activeOpacity={0.8}
           onPress={handleNewRequest}
         >
@@ -418,7 +426,7 @@ const CareRecipientDashboard = () => {
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Current Status</Text>
           <TouchableOpacity onPress={() => navigation.navigate('RecipientSchedule')}>
-             <Text style={styles.link}>View Schedule</Text>
+            <Text style={styles.link}>View Schedule</Text>
           </TouchableOpacity>
         </View>
 
@@ -471,14 +479,14 @@ const CareRecipientDashboard = () => {
                   </View>
 
                   <View style={styles.actionRow}>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       style={styles.completeBtn}
                       onPress={() => handleMarkCompleted(booking.id)}
                     >
                       <Icon name="check-circle" size={16} color="#fff" style={{ marginRight: 6 }} />
                       <Text style={styles.completeBtnText}>Mark as Completed</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       style={styles.trackBtn}
                       onPress={() => {
                         // Get recipient location from user's address or booking location
@@ -486,9 +494,9 @@ const CareRecipientDashboard = () => {
                         const recipientLocation = user?.address?.latitude && user?.address?.longitude
                           ? { latitude: user.address.latitude, longitude: user.address.longitude }
                           : booking.location?.latitude && booking.location?.longitude
-                          ? { latitude: booking.location.latitude, longitude: booking.location.longitude }
-                          : { latitude: 17.3850, longitude: 78.4867 }; // Default: Hyderabad
-                        
+                            ? { latitude: booking.location.latitude, longitude: booking.location.longitude }
+                            : { latitude: 17.3850, longitude: 78.4867 }; // Default: Hyderabad
+
                         navigation.navigate('CaregiverMapScreen', {
                           recipientLocation,
                           recipientName: user?.full_name || 'Care Recipient',
@@ -519,7 +527,7 @@ const CareRecipientDashboard = () => {
 
       {/* BOTTOM NAV */}
       <BottomNav />
-      
+
     </SafeAreaView>
   );
 };
@@ -528,7 +536,7 @@ export default CareRecipientDashboard;
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F6FAF5" },
-  
+
   // --- SWIPE BUTTON STYLES ---
   swipeContainer: {
     height: SWIPE_HEIGHT, backgroundColor: RED, borderRadius: SWIPE_HEIGHT / 2,
@@ -571,7 +579,7 @@ const styles = StyleSheet.create({
   headerRow: {
     flexDirection: "row", justifyContent: "space-between", alignItems: "center",
     marginBottom: 12, paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'android' ? 40 : 10, 
+    paddingTop: Platform.OS === 'android' ? 40 : 10,
     marginTop: Platform.OS === 'android' ? 10 : 0,
   },
   date: { color: GREEN, fontSize: 12, fontWeight: "600", letterSpacing: 1 },
@@ -581,7 +589,7 @@ const styles = StyleSheet.create({
     shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4,
   },
   notificationDot: { position: 'absolute', top: 10, right: 10, width: 8, height: 8, borderRadius: 4, backgroundColor: 'red', borderWidth: 1, borderColor: '#fff' },
-  
+
   // Updated Profile Card to be touchable and consistent
   profileCard: {
     backgroundColor: "#fff", borderRadius: 18, padding: 16,
@@ -592,12 +600,12 @@ const styles = StyleSheet.create({
   profileLeft: { flexDirection: "row", alignItems: "center" },
   avatarWrapper: { marginRight: 12 },
   avatar: { width: 50, height: 50, borderRadius: 25 },
-  avatarPlaceholder: { 
-    width: 50, 
-    height: 50, 
-    borderRadius: 25, 
-    backgroundColor: '#F3F4F6', 
-    justifyContent: 'center', 
+  avatarPlaceholder: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#F3F4F6',
+    justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
     borderColor: '#E5E7EB',
@@ -606,7 +614,7 @@ const styles = StyleSheet.create({
   percentText: { color: "#fff", fontSize: 10, fontWeight: "700" },
   name: { fontSize: 16, fontWeight: "700", color: '#1A1A1A' },
   link: { color: GREEN, fontSize: 13, fontWeight: "600" },
-  
+
   requestBtn: {
     backgroundColor: GREEN, paddingVertical: 16, borderRadius: 18,
     flexDirection: 'row', alignItems: "center", justifyContent: 'center',
@@ -614,7 +622,7 @@ const styles = StyleSheet.create({
     shadowColor: GREEN, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4,
   },
   requestText: { fontSize: 16, fontWeight: "700", color: '#fff' },
-  
+
   servicesRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 24, paddingHorizontal: 16 },
   serviceItem: { alignItems: "center", width: "23%" },
   serviceIcon: {
@@ -625,7 +633,7 @@ const styles = StyleSheet.create({
   serviceText: { fontSize: 12, fontWeight: '500', color: '#1A1A1A' },
   sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: 'center', marginBottom: 12, paddingHorizontal: 16 },
   sectionTitle: { fontSize: 18, fontWeight: "700", color: '#1A1A1A' },
-  
+
   visitCard: {
     backgroundColor: "#fff", borderRadius: 18, padding: 12,
     flexDirection: "row", marginBottom: 24, marginHorizontal: 16,
@@ -636,22 +644,22 @@ const styles = StyleSheet.create({
   arriving: { color: GREEN, marginTop: 2, marginBottom: 8, fontWeight: "600", fontSize: 13 },
   caregiverRow: { flexDirection: "row", alignItems: "center" },
   smallAvatar: { width: 24, height: 24, borderRadius: 12, marginRight: 8 },
-  smallAvatarPlaceholder: { 
-    width: 24, 
-    height: 24, 
-    borderRadius: 12, 
-    backgroundColor: "#F3F4F6", 
+  smallAvatarPlaceholder: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#F3F4F6",
     marginRight: 8,
     justifyContent: 'center',
     alignItems: 'center',
   },
   caregiverText: { color: "#555", fontSize: 13 },
   actionRow: { flexDirection: "row", marginTop: 12, alignItems: "center", gap: 8 },
-  completeBtn: { 
-    backgroundColor: GREEN, 
-    paddingVertical: 8, 
-    paddingHorizontal: 12, 
-    borderRadius: 10, 
+  completeBtn: {
+    backgroundColor: GREEN,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
     flexDirection: 'row',
     alignItems: 'center',
     marginRight: 8,

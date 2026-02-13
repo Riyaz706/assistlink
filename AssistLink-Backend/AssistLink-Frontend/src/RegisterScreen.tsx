@@ -6,6 +6,7 @@ import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { api } from './api/client';
 import { useAuth } from './context/AuthContext';
 import { useGoogleAuth } from './hooks/useGoogleAuth';
+import { useErrorHandler, isNetworkError, isValidationError } from './hooks/useErrorHandler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const COLORS = {
@@ -19,6 +20,7 @@ const COLORS = {
   cardBackground: '#FFFFFF',
   cardSelectedBg: '#E8F5E9',
   cardBorder: '#E8E8E8',
+  errorRed: '#DC2626',
 };
 
 const { width } = Dimensions.get('window');
@@ -33,13 +35,13 @@ const RegisterScreen = ({ navigation }: any) => {
 
   const [selectedRole, setSelectedRole] = useState('provide');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const { login, refreshUser } = useAuth();
   const { signInWithGoogle, loading: googleLoading, isReady: googleReady } = useGoogleAuth();
+  const { error, handleError, clearError } = useErrorHandler();
 
   // --- UPDATED: Handle Google Sign Up ---
   const handleGoogleSignUp = async () => {
-    setError(null);
+    clearError();
     setLoading(true);
 
     try {
@@ -77,7 +79,7 @@ const RegisterScreen = ({ navigation }: any) => {
 
     } catch (err: any) {
       console.error('[RegisterScreen] Google sign up error:', err);
-      setError(err?.message || 'Failed to sign up with Google');
+      handleError(err, 'google-signup');
     } finally {
       setLoading(false);
     }
@@ -108,11 +110,39 @@ const RegisterScreen = ({ navigation }: any) => {
   };
 
   const handleCreateAccount = async () => {
+    clearError();
+
+    // Client-side validation
     if (!fullName || !email || !password) {
-      setError('Please fill all required fields');
+      handleError(new Error('Please fill all required fields'), 'validation');
       return;
     }
-    setError(null);
+
+    // Validate full name
+    if (fullName.trim().length < 2) {
+      handleError(new Error('Please enter your full name'), 'validation');
+      return;
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      handleError(new Error('Please enter a valid email address'), 'validation');
+      return;
+    }
+
+    // Validate password strength
+    if (password.length < 8) {
+      handleError(new Error('Password must be at least 8 characters long'), 'validation');
+      return;
+    }
+
+    // Validate phone if provided
+    if (phone && phone.length !== 10) {
+      handleError(new Error('Please enter a valid 10-digit phone number'), 'validation');
+      return;
+    }
+
     setLoading(true);
     try {
       const role =
@@ -132,10 +162,12 @@ const RegisterScreen = ({ navigation }: any) => {
       // Auto-login after successful registration
       await login(email.trim(), password);
     } catch (e: any) {
-      setError(
-        e?.message ||
-        'Failed to create account. This email may already be registered.'
-      );
+      const errorDetails = handleError(e, 'register');
+
+      // Log for debugging
+      if (!isNetworkError(e) && !isValidationError(e)) {
+        console.error('[RegisterScreen] Registration error:', e);
+      }
     } finally {
       setLoading(false);
     }
@@ -328,7 +360,10 @@ const RegisterScreen = ({ navigation }: any) => {
 
             {/* Create Account Button */}
             {error ? (
-              <Text style={styles.errorText}>{error}</Text>
+              <View style={styles.errorContainer}>
+                <Icon name="alert-circle-outline" size={20} color={COLORS.errorRed} />
+                <Text style={styles.errorText}>{error.message}</Text>
+              </View>
             ) : null}
 
             <TouchableOpacity
@@ -540,11 +575,20 @@ const styles = StyleSheet.create({
     color: COLORS.grayText,
     fontSize: 12,
   },
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEE2E2',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 12,
+    marginBottom: 8,
+    gap: 8,
+  },
   errorText: {
-    marginTop: 6,
-    color: '#DC2626',
+    flex: 1,
+    color: COLORS.errorRed,
     fontSize: 13,
-    textAlign: 'center',
   },
   createButton: {
     backgroundColor: COLORS.primaryGreen,

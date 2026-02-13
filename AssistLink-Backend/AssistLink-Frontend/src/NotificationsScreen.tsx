@@ -5,6 +5,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { api } from './api/client';
 import { useAuth } from './context/AuthContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useErrorHandler } from './hooks/useErrorHandler';
 
 const { width } = Dimensions.get('window');
 
@@ -19,6 +20,7 @@ const COLORS = {
   red: '#FF4444'
 };
 
+
 const NotificationsScreen = ({ navigation }: any) => {
   const [activeTab, setActiveTab] = useState('All');
   const tabs = ['All', 'Requests', 'Updates', 'Messages'];
@@ -26,7 +28,8 @@ const NotificationsScreen = ({ navigation }: any) => {
   const { user, loading: authLoading, accessToken } = useAuth();
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Removed local error state
+  const { handleError, error, clearError } = useErrorHandler();
 
   const loadNotifications = async () => {
     // Don't try to load if auth is still loading or if there's no token
@@ -37,20 +40,13 @@ const NotificationsScreen = ({ navigation }: any) => {
 
     console.log('[Notifications] Loading notifications...');
     setLoading(true);
-    setError(null);
+    clearError();
     try {
       const data = await api.getNotifications({ limit: 50, offset: 0 });
       console.log('[Notifications] Loaded', Array.isArray(data) ? data.length : 0, 'notifications');
-      console.log('[Notifications] Data:', JSON.stringify(data, null, 2));
       setItems(data as any[]);
     } catch (e: any) {
-      const errorMsg = e?.message || 'Failed to load notifications';
-      setError(errorMsg);
-      console.error('[Notifications] Error loading notifications:', e);
-      // If it's an auth error, try to reload token
-      if (errorMsg.includes('Not authenticated') || errorMsg.includes('401')) {
-        console.warn('[Notifications] Authentication error - token may be expired or invalid');
-      }
+      handleError(e, 'notifications-load');
     } finally {
       setLoading(false);
     }
@@ -99,7 +95,7 @@ const NotificationsScreen = ({ navigation }: any) => {
       // Reload notifications to update UI
       await loadNotifications();
     } catch (error) {
-      console.error('Error handling notification tap:', error);
+      handleError(error, 'notification-tap');
     }
   };
 
@@ -115,11 +111,13 @@ const NotificationsScreen = ({ navigation }: any) => {
     React.useCallback(() => {
       if (!authLoading && accessToken) {
         loadNotifications();
+        return () => clearError();
       }
     }, [authLoading, accessToken])
   );
 
   const renderNotificationItem = (item: any) => {
+    // ... (existing renderNotificationItem logic)
     const type = item.type || 'update';
     const title = item.title || 'Notification';
     const content = item.message || item.body || item.content || '';
@@ -223,8 +221,8 @@ const NotificationsScreen = ({ navigation }: any) => {
                   try {
                     await api.acceptVideoCallRequest(item.data.video_call_id, true);
                     await loadNotifications();
-                  } catch {
-                    // ignore
+                  } catch (e) {
+                    handleError(e, 'accept-call');
                   }
                 }}
               >
@@ -236,8 +234,8 @@ const NotificationsScreen = ({ navigation }: any) => {
                   try {
                     await api.acceptVideoCallRequest(item.data.video_call_id, false);
                     await loadNotifications();
-                  } catch {
-                    // ignore
+                  } catch (e) {
+                    handleError(e, 'decline-call');
                   }
                 }}
               >
@@ -268,8 +266,8 @@ const NotificationsScreen = ({ navigation }: any) => {
               try {
                 await api.markAllNotificationsRead();
                 await loadNotifications();
-              } catch {
-                // ignore
+              } catch (e) {
+                handleError(e, 'mark-all-read');
               }
             }}
           >
@@ -300,9 +298,17 @@ const NotificationsScreen = ({ navigation }: any) => {
           <ActivityIndicator color={COLORS.primaryGreen} />
         </View>
       )}
+
+      {/* Error Banner */}
       {error && (
-        <View style={{ paddingHorizontal: 20, paddingBottom: 10 }}>
-          <Text style={{ color: 'red', fontSize: 13 }}>{error}</Text>
+        <View style={styles.errorContainer}>
+          <MaterialCommunityIcons name="alert-circle" size={20} color="#FFF" />
+          <Text style={styles.errorText} numberOfLines={2}>
+            {error.message || "Failed to load notifications"}
+          </Text>
+          <TouchableOpacity onPress={clearError}>
+            <MaterialCommunityIcons name="close" size={20} color="#FFF" />
+          </TouchableOpacity>
         </View>
       )}
 
@@ -527,6 +533,25 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#E0E0E0',
+  },
+  // Error Styles
+  errorContainer: {
+    backgroundColor: '#EF4444',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    marginHorizontal: 20,
+    marginBottom: 10,
+    borderRadius: 8,
+  },
+  errorText: {
+    color: '#FFF',
+    flex: 1,
+    marginHorizontal: 8,
+    fontSize: 13,
+    fontWeight: '500',
   },
 });
 

@@ -3,9 +3,18 @@ from fastapi.responses import RedirectResponse, JSONResponse
 from app.schemas import UserCreate, UserResponse, LoginRequest, PasswordChangeRequest
 from app.database import supabase, supabase_admin
 from app.dependencies import get_current_user, get_user_id, get_user_id
+from app.error_handler import (
+    ConflictError,
+    AuthenticationError,
+    ValidationError,
+    DatabaseError,
+    NotFoundError
+)
 from pydantic import BaseModel
 from typing import Optional
+from typing import Optional
 import sys
+from app.limiter import limiter
 
 router = APIRouter()
 
@@ -17,7 +26,8 @@ class GoogleOAuthCallback(BaseModel):
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(user_data: UserCreate):
+@limiter.limit("5/minute")
+async def register(request: Request, user_data: UserCreate):
     """Register a new user"""
     try:
         # Create user in Supabase Auth
@@ -33,10 +43,7 @@ async def register(user_data: UserCreate):
         })
         
         if not auth_response.user:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to create user account"
-            )
+            raise DatabaseError("Failed to create user account in authentication system")
         
         # Get user ID from auth response
         user_id = auth_response.user.id if hasattr(auth_response.user, 'id') else auth_response.user.get('id') if isinstance(auth_response.user, dict) else str(auth_response.user)
@@ -57,27 +64,30 @@ async def register(user_data: UserCreate):
         profile_response = supabase_admin.table("users").insert(user_profile).execute()
         
         if not profile_response.data:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create user profile"
-            )
+            raise DatabaseError("Failed to create user profile in database")
         
         return profile_response.data[0]
     
+    except ConflictError:
+        raise
+    except DatabaseError:
+        raise
     except Exception as e:
-        if "already registered" in str(e).lower() or "already exists" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User with this email already exists"
+        error_msg = str(e).lower()
+        if "already registered" in error_msg or "already exists" in error_msg or "duplicate" in error_msg:
+            raise ConflictError(
+                "An account with this email already exists. Please login or use a different email.",
+                details={"email": user_data.email}
             )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        
+        sys.stderr.write(f"[AUTH] Registration error: {str(e)}\n")
+        sys.stderr.flush()
+        raise DatabaseError(f"Registration failed: {str(e)}")
 
 
-@router.post("/login")
-async def login(credentials: LoginRequest):
+@router.post("/login", response_model=dict)
+@limiter.limit("5/minute")
+async def login(request: Request, credentials: LoginRequest):
     """Login user and get access token"""
     try:
         response = supabase.auth.sign_in_with_password({
@@ -86,23 +96,54 @@ async def login(credentials: LoginRequest):
         })
         
         if not response.user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid email or password"
-            )
+            raise AuthenticationError("Invalid email or password. Please check your credentials.")
         
         # Check if session exists and has access_token
         if not response.session:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Login failed: No session created. Please check your credentials."
+            raise AuthenticationError("Login failed: No session created. Please try again.")
+        
+        access_token = response.session.access_token
+        if not access_token:
+            raise AuthenticationError("Login failed: No access token received. Please try again.")
+        
+        # Get user profile
+        user_id = response.user.id if hasattr(response.user, 'id') else response.user.get('id') if isinstance(response.user, dict) else str(response.user)
+        
+        user_profile_response = supabase.table("users").select("*").eq("id", user_id).execute()
+        
+        user_profile = None
+        if user_profile_response.data and len(user_profile_response.data) > 0:
+            user_profile = user_profile_response.data[0]
+        
+        return {
+            "access_token": access_token,
+            "refresh_token": response.session.refresh_token if response.session.refresh_token else None,
+            "token_type": "bearer",
+            "user": user_profile
+        }
+    
+    except AuthenticationError:
+        raise
+    except Exception as e:
+        error_message = str(e).lower()
+        
+        # Provide specific error messages based on error type
+        if "invalid login credentials" in error_message or "invalid_credentials" in error_message:
+            raise AuthenticationError("Invalid email or password. Please check your credentials.")
+        elif "email not confirmed" in error_message or "email_not_confirmed" in error_message:
+            raise AuthenticationError(
+                "Email not verified. Please check your email for verification link.",
+                details={"email": credentials.email}
             )
+        elif "network" in error_message or "connection" in error_message:
+            raise DatabaseError("Unable to connect to authentication service. Please try again.")
+        else:
+            sys.stderr.write(f"[AUTH] Login error: {str(e)}\n")
+            sys.stderr.flush()
+            raise AuthenticationError(f"Login failed: {str(e)}")
         
         if not hasattr(response.session, 'access_token') or not response.session.access_token:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Login failed: Invalid session. Please try again."
-            )
+            raise AuthenticationError("Login failed: Invalid session. Please try again.")
         
         return {
             "access_token": response.session.access_token,
@@ -138,6 +179,7 @@ class ResetPasswordRequest(BaseModel):
     email: str
 
 
+
 @router.post("/reset-password", status_code=status.HTTP_200_OK)
 async def reset_password(request: ResetPasswordRequest):
     """Send password reset email to user"""
@@ -169,10 +211,7 @@ async def change_password(
         # Get user email from current_user
         email = current_user.get('email')
         if not email:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User email not found"
-            )
+            raise ValidationError("User email not found in session", "email")
 
         # Verify current password by attempting to sign in
         # OAuth users (Google sign-in) may not have a password set
@@ -183,16 +222,13 @@ async def change_password(
                     "password": request.current_password
                 })
                 if not auth_response.user:
-                    raise Exception("Invalid current password")
+                    raise AuthenticationError("Invalid current password")
                 sys.stderr.write(f"[INFO] Current password verified for {email}\n")
                 sys.stderr.flush()
             except Exception as e:
                 sys.stderr.write(f"[ERROR] Password verification failed: {str(e)}\n")
                 sys.stderr.flush()
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Incorrect current password"
-                )
+                raise AuthenticationError("Incorrect current password")
         else:
             # OAuth user setting password for the first time
             sys.stderr.write(f"[INFO] OAuth user {email} setting password (no current password provided)\n")
@@ -201,10 +237,7 @@ async def change_password(
         # Get user ID
         user_id = get_user_id(current_user)
         if not user_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User ID not found"
-            )
+            raise ValidationError("User ID not found in session", "user_id")
         
         # Ensure user_id is a string
         user_id_str = str(user_id)
@@ -225,7 +258,7 @@ async def change_password(
             sys.stderr.flush()
             
             if not response.user:
-                raise Exception("No user returned from update")
+                raise DatabaseError("No user returned from password update operation")
                 
             sys.stderr.write(f"[SUCCESS] Password updated for {email}\n")
             sys.stderr.flush()
@@ -233,21 +266,21 @@ async def change_password(
         except Exception as e:
             sys.stderr.write(f"[ERROR] Password update failed: {str(e)}\n")
             sys.stderr.flush()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to update password: {str(e)}"
-            )
+            raise DatabaseError(f"Failed to update password: {str(e)}")
             
         return {"message": "Password updated successfully"}
-    except HTTPException:
+    
+    except ValidationError:
+        raise
+    except AuthenticationError:
+        raise
+    except DatabaseError:
         raise
     except Exception as e:
         sys.stderr.write(f"[ERROR] Change password error: {str(e)}\n")
         sys.stderr.flush()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update password: {str(e)}"
-        )
+        raise DatabaseError(f"An unexpected error occurred while changing password: {str(e)}")
+
 
 
 
@@ -257,10 +290,7 @@ async def get_current_user_profile(current_user: dict = Depends(get_current_user
     try:
         user_id = get_user_id(current_user)
         if not user_id:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid user data: user ID not found"
-            )
+            raise AuthenticationError("Invalid user session: User ID not found")
         
         # Use supabase_admin to bypass RLS policies
         response = supabase_admin.table("users").select("*").eq("id", user_id).execute()
@@ -303,20 +333,18 @@ async def get_current_user_profile(current_user: dict = Depends(get_current_user
                     sys.stderr.flush()
                     return insert_resp.data[0]
                 else:
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail="Failed to create user profile"
-                    )
+                    raise DatabaseError("Failed to auto-provision user profile")
             except Exception as provision_error:
                 sys.stderr.write(f"[ERROR] Error auto-provisioning user profile: {provision_error}\n")
                 sys.stderr.flush()
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"User profile not found and could not be created: {str(provision_error)}"
-                )
+                # Re-raise as DatabaseError but don't expose internal details too much
+                raise DatabaseError(f"User profile could not be created: {str(provision_error)}")
         
         return response.data[0]
-    except HTTPException:
+        
+    except AuthenticationError:
+        raise
+    except DatabaseError:
         raise
     except Exception as e:
         import traceback
@@ -324,9 +352,8 @@ async def get_current_user_profile(current_user: dict = Depends(get_current_user
         sys.stderr.write(f"[ERROR] Error in /api/auth/me: {str(e)}\n")
         sys.stderr.write(f"Traceback: {error_details}\n")
         sys.stderr.flush()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get user profile: {str(e)}"
+        raise DatabaseError(
+            f"Failed to retrieve user profile: {str(e)}"
         )
 
 
@@ -337,10 +364,10 @@ async def logout(current_user: dict = Depends(get_current_user)):
         supabase.auth.sign_out()
         return {"message": "Logged out successfully"}
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        sys.stderr.write(f"[ERROR] Logout error: {str(e)}\n")
+        sys.stderr.flush()
+        raise DatabaseError(f"Logout failed: {str(e)}")
+
 
 
 @router.get("/google/url")
@@ -360,9 +387,9 @@ async def get_google_oauth_url(redirect_to: Optional[str] = None):
             # Get from environment variable or fail
             redirect_to = os.getenv('OAUTH_REDIRECT_URL')
             if not redirect_to:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="redirect_to parameter is required or OAUTH_REDIRECT_URL must be set"
+                raise ValidationError(
+                    "redirect_to parameter is required or OAUTH_REDIRECT_URL must be set",
+                    "redirect_to"
                 )
         
         # Construct Supabase OAuth URL
@@ -379,13 +406,12 @@ async def get_google_oauth_url(redirect_to: Optional[str] = None):
             "provider": "google"
         }
         
+    except ValidationError:
+        raise
     except Exception as e:
         sys.stderr.write(f"[ERROR] Error generating Google OAuth URL: {str(e)}\n")
         sys.stderr.flush()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate OAuth URL: {str(e)}"
-        )
+        raise DatabaseError(f"Failed to generate OAuth URL: {str(e)}")
 
 
 @router.get("/google/callback")
@@ -398,16 +424,10 @@ async def google_oauth_callback(request: Request, code: Optional[str] = None, er
         if error:
             sys.stderr.write(f"[ERROR] Google OAuth error: {error}\n")
             sys.stderr.flush()
-            return JSONResponse(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                content={"error": error, "message": "Google authentication failed"}
-            )
+            raise AuthenticationError(f"Google authentication failed: {error}")
         
         if not code:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Authorization code not provided"
-            )
+            raise ValidationError("Authorization code not provided", "code")
         
         # Exchange code for session
         # Note: Supabase handles this automatically, but we need to handle the callback
@@ -421,13 +441,12 @@ async def google_oauth_callback(request: Request, code: Optional[str] = None, er
             }
         )
         
+    except (ValidationError, AuthenticationError):
+        raise
     except Exception as e:
         sys.stderr.write(f"[ERROR] Error in Google OAuth callback: {str(e)}\n")
         sys.stderr.flush()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"OAuth callback failed: {str(e)}"
-        )
+        raise DatabaseError(f"OAuth callback processing failed: {str(e)}")
 
 
 @router.post("/google/verify")
@@ -443,20 +462,14 @@ async def verify_google_session(session_data: dict):
         refresh_token = session_data.get("refresh_token")
         
         if not access_token:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Access token not provided"
-            )
+            raise ValidationError("Access token not provided", "access_token")
         
         # Verify the token by getting the user
         # Use the access token to get user info
         user_response = supabase.auth.get_user(access_token)
         
         if not user_response.user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid access token"
-            )
+            raise AuthenticationError("Invalid access token or expired session")
         
         user = user_response.user
         user_id = user.id if hasattr(user, 'id') else user.get('id') if isinstance(user, dict) else str(user)
@@ -501,6 +514,7 @@ async def verify_google_session(session_data: dict):
             if not insert_response.data:
                 sys.stderr.write(f"[WARN] Failed to create user profile for {user_id}\n")
                 sys.stderr.flush()
+                # Not raising error here to allow login to proceed, but logging warning
         
         return {
             "access_token": access_token,
@@ -509,12 +523,9 @@ async def verify_google_session(session_data: dict):
             "user": user
         }
         
-    except HTTPException:
+    except (ValidationError, AuthenticationError):
         raise
     except Exception as e:
         sys.stderr.write(f"[ERROR] Error verifying Google session: {str(e)}\n")
         sys.stderr.flush()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to verify session: {str(e)}"
-        )
+        raise DatabaseError(f"Failed to verify Google session: {str(e)}")

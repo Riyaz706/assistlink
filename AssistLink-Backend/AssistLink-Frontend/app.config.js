@@ -44,6 +44,7 @@ export default {
     plugins: [
       ['expo-camera', { cameraPermission: 'Allow AssistLink to access your camera for video calls.' }],
       ['expo-av', { microphonePermission: 'Allow AssistLink to access your microphone for video calls.' }],
+      'expo-font'
     ],
     web: { favicon: './assets/favicon.png' },
     extra: {

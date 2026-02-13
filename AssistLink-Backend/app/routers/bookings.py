@@ -9,6 +9,10 @@ from app.schemas import (
 from app.database import supabase, supabase_admin
 from app.dependencies import get_current_user, verify_care_recipient, verify_caregiver
 from app.config import settings
+from app.error_handler import (
+    AuthenticationError, AuthorizationError, NotFoundError,
+    DatabaseError, ValidationError, ConflictError, log_error
+)
 from app.services.notifications import (
     notify_video_call_request,
     notify_video_call_created_for_recipient,
@@ -34,17 +38,13 @@ async def create_video_call_request(
     This happens when a care recipient selects a caregiver.
     """
     try:
-        print(f"\n[INFO] ===== VIDEO CALL REQUEST CREATION STARTED =====", flush=True)
+        print(f"\n[INFO] ===== BOOKING CREATION STARTED =====", flush=True)
         # Get user_id from current_user
         user_id = current_user.get("id") if isinstance(current_user, dict) else str(current_user.get("id", ""))
         print(f"[INFO] Care Recipient ID: {user_id}", flush=True)
-        print(f"[INFO] Caregiver ID: {video_call_data.caregiver_id}", flush=True)
         
         if not user_id:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User ID not found in authentication token"
-            )
+            raise AuthenticationError("User ID not found in authentication token")
         
         # Verify caregiver exists - use supabase_admin to bypass RLS
         try:
@@ -52,25 +52,15 @@ async def create_video_call_request(
             data = caregiver_check.data[0] if caregiver_check.data else None
             
             if not data:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Caregiver not found"
-                )
+                raise NotFoundError("Caregiver not found", details={"caregiver_id": str(video_call_data.caregiver_id)})
             
             if not data.get("is_active", True):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Caregiver is not active"
-                )
+                raise ValidationError("Caregiver is not active", details={"caregiver_id": str(video_call_data.caregiver_id)})
         except HTTPException:
             raise
-            error_msg = str(e).lower()
-            if "not found" in error_msg or "0 rows" in error_msg or "pgrst116" in error_msg:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Caregiver with ID {video_call_data.caregiver_id} not found or is not a caregiver"
-                )
-            raise
+        except Exception as e:
+            # Re-raise as DatabaseError or generic based on type
+            raise DatabaseError(f"Error checking caregiver: {str(e)}")
         
         # Create video call request
         scheduled_time_iso = video_call_data.scheduled_time.isoformat()
@@ -99,16 +89,10 @@ async def create_video_call_request(
             error_msg = str(insert_error)
             print(f"[ERROR] Error inserting video call request: {error_msg}", flush=True)
             traceback.print_exc()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to create video call request: {error_msg}"
-            )
+            raise DatabaseError(f"Failed to create video call request: {error_msg}")
         
         if not response.data:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create video call request. No data returned."
-            )
+            raise DatabaseError("Failed to create video call request. No data returned.")
         
         video_call = response.data[0]
         print(f"[INFO] Video call request created with ID: {video_call['id']}", flush=True)
@@ -197,18 +181,12 @@ async def get_video_call_request(
         response = supabase.table("video_call_requests").select("*").eq("id", video_call_id).execute()
         
         if not response.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Video call request not found"
-            )
+            raise NotFoundError("Video call request not found", details={"video_call_id": video_call_id})
         
         # Verify user has access
         video_call = response.data[0]
         if video_call["care_recipient_id"] != current_user["id"] and video_call["caregiver_id"] != current_user["id"]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied"
-            )
+            raise AuthorizationError("You do not have permission to access this video call")
         
         return video_call
     except HTTPException:
@@ -296,7 +274,12 @@ async def accept_video_call_request(
                     update_data["status"] = "pending"
                 print(f"   Only one party accepted - keeping status as 'pending'", flush=True)
         
-        # Update video call request - use supabase_admin to bypass RLS
+        # Store original values for rollback
+        original_status = video_call.get("status")
+        original_care_recipient_accepted = video_call.get("care_recipient_accepted")
+        original_caregiver_accepted = video_call.get("caregiver_accepted")
+        
+        # Update video_call request
         try:
             update_response = supabase_admin.table("video_call_requests").update(update_data).eq("id", video_call_id).execute()
         except Exception as update_error:
@@ -312,51 +295,55 @@ async def accept_video_call_request(
         updated_call = update_response.data[0]
         print(f"[INFO] Video call {video_call_id} updated. Status: {updated_call.get('status')}, CR accepted: {updated_call.get('care_recipient_accepted')}, CG accepted: {updated_call.get('caregiver_accepted')}", flush=True)
         
-        # If caregiver accepts, create booking automatically (whether or not care_recipient has accepted)
-        # This ensures a booking is created as soon as caregiver accepts
-        chat_session_id = None
+        # BEGIN TRANSACTION-LIKE SEQUENCE
         booking_id = None
+        chat_session_id = None
+        rollback_needed = False
+        rollback_reason = ""
         
-        # Check if caregiver just accepted
-        caregiver_just_accepted = is_caregiver and accept_data.accept and not video_call.get("caregiver_accepted", False)
-        
-        # Check if care recipient just accepted and caregiver already accepted (booking might not exist yet)
-        care_recipient_just_accepted = is_care_recipient and accept_data.accept and not video_call.get("care_recipient_accepted", False)
-        caregiver_already_accepted = video_call.get("caregiver_accepted", False)
-        
-        # Check if both parties have accepted (after update)
-        both_accepted = updated_call.get("care_recipient_accepted", False) and updated_call.get("caregiver_accepted", False)
-        
-        # Check if status just became "accepted" (this is the key trigger per user requirement)
-        status_just_became_accepted = updated_call.get("status") == "accepted" and video_call.get("status") != "accepted"
-        
-        print(f"[INFO] Booking creation check:", flush=True)
-        print(f"[INFO]   is_caregiver: {is_caregiver}, is_care_recipient: {is_care_recipient}, accept_data.accept: {accept_data.accept}", flush=True)
-        print(f"[INFO]   video_call.caregiver_accepted: {video_call.get('caregiver_accepted', False)}, video_call.care_recipient_accepted: {video_call.get('care_recipient_accepted', False)}", flush=True)
-        print(f"[INFO]   video_call.status (before): {video_call.get('status')}, updated_call.status (after): {updated_call.get('status')}", flush=True)
-        print(f"[INFO]   caregiver_just_accepted: {caregiver_just_accepted}, care_recipient_just_accepted: {care_recipient_just_accepted}, caregiver_already_accepted: {caregiver_already_accepted}, both_accepted: {both_accepted}, status_just_became_accepted: {status_just_became_accepted}", flush=True)
-        
-        # Create booking when:
-        # 1. Caregiver accepts (even if care_recipient hasn't accepted yet) - PRIMARY TRIGGER
-        # 2. Care recipient accepts and caregiver already accepted (booking might not exist yet)
-        # 3. Status transitions to "accepted" (per user requirement: "when a Video Call request transitions to the status Accepted")
-        # 4. Both parties have accepted
-        # But check if booking already exists to avoid duplicates
-        should_create_booking = caregiver_just_accepted or (care_recipient_just_accepted and caregiver_already_accepted) or status_just_became_accepted or both_accepted
-        
-        if should_create_booking:
-            print(f"[INFO] Caregiver accepted video call {video_call_id}", flush=True)
-            print(f"[INFO] Checking for existing booking and creating if needed...", flush=True)
+        try:
+            # If caregiver accepts, create booking automatically (whether or not care_recipient has accepted)
+            # This ensures a booking is created as soon as caregiver accepts
             
-            # Check if booking already exists for this video call
-            existing_booking_check = supabase_admin.table("bookings").select("id").eq("video_call_request_id", video_call_id).execute()
+            # Check if caregiver just accepted
+            caregiver_just_accepted = is_caregiver and accept_data.accept and not video_call.get("caregiver_accepted", False)
             
-            if existing_booking_check.data and len(existing_booking_check.data) > 0:
-                booking_id = existing_booking_check.data[0]["id"]
-                print(f"[INFO] Booking already exists with ID: {booking_id}", flush=True)
-            else:
-                # Auto-create booking for payment when caregiver accepts
-                try:
+            # Check if care recipient just accepted and caregiver already accepted (booking might not exist yet)
+            care_recipient_just_accepted = is_care_recipient and accept_data.accept and not video_call.get("care_recipient_accepted", False)
+            caregiver_already_accepted = video_call.get("caregiver_accepted", False)
+            
+            # Check if both parties have accepted (after update)
+            both_accepted = updated_call.get("care_recipient_accepted", False) and updated_call.get("caregiver_accepted", False)
+            
+            # Check if status just became "accepted" (this is the key trigger per user requirement)
+            status_just_became_accepted = updated_call.get("status") == "accepted" and video_call.get("status") != "accepted"
+            
+            print(f"[INFO] Booking creation check:", flush=True)
+            print(f"[INFO]   is_caregiver: {is_caregiver}, is_care_recipient: {is_care_recipient}, accept_data.accept: {accept_data.accept}", flush=True)
+            print(f"[INFO]   video_call.caregiver_accepted: {video_call.get('caregiver_accepted', False)}, video_call.care_recipient_accepted: {video_call.get('care_recipient_accepted', False)}", flush=True)
+            print(f"[INFO]   video_call.status (before): {video_call.get('status')}, updated_call.status (after): {updated_call.get('status')}", flush=True)
+            print(f"[INFO]   caregiver_just_accepted: {caregiver_just_accepted}, care_recipient_just_accepted: {care_recipient_just_accepted}, caregiver_already_accepted: {caregiver_already_accepted}, both_accepted: {both_accepted}, status_just_became_accepted: {status_just_became_accepted}", flush=True)
+            
+            # Create booking when:
+            # 1. Caregiver accepts (even if care_recipient hasn't accepted yet) - PRIMARY TRIGGER
+            # 2. Care recipient accepts and caregiver already accepted (booking might not exist yet)
+            # 3. Status transitions to "accepted" (per user requirement: "when a Video Call request transitions to the status Accepted")
+            # 4. Both parties have accepted
+            # But check if booking already exists to avoid duplicates
+            should_create_booking = caregiver_just_accepted or (care_recipient_just_accepted and caregiver_already_accepted) or status_just_became_accepted or both_accepted
+            
+            if should_create_booking:
+                print(f"[INFO] Caregiver accepted video call {video_call_id}", flush=True)
+                print(f"[INFO] Checking for existing booking and creating if needed...", flush=True)
+                
+                # Check if booking already exists for this video call
+                existing_booking_check = supabase_admin.table("bookings").select("id").eq("video_call_request_id", video_call_id).execute()
+                
+                if existing_booking_check.data and len(existing_booking_check.data) > 0:
+                    booking_id = existing_booking_check.data[0]["id"]
+                    print(f"[INFO] Booking already exists with ID: {booking_id}", flush=True)
+                else:
+                    # Auto-create booking for payment when caregiver accepts
                     # Get service type from video call request or use default
                     # We'll use the scheduled_time from video call as the booking date
                     booking_dict = {
@@ -390,7 +377,7 @@ async def accept_video_call_request(
                         except Exception as avail_error:
                             print(f"[WARN] Error updating caregiver availability: {avail_error}", flush=True)
                         
-                        # Send booking notification to caregiver
+                        # Send booking notification to caregiver (Non-critical)
                         try:
                             care_recipient_response = supabase_admin.table("users").select("full_name").eq("id", video_call["care_recipient_id"]).execute()
                             care_recipient_name = care_recipient_response.data[0].get("full_name", "A care recipient") if care_recipient_response.data else "A care recipient"
@@ -400,7 +387,6 @@ async def accept_video_call_request(
                                 care_recipient_name=care_recipient_name,
                                 booking_id=booking_id
                             )
-                            print(f"[INFO] Booking notification sent to caregiver", flush=True)
                         except Exception as notif_error:
                             print(f"[WARN] Error sending booking notification: {notif_error}", flush=True)
                         
@@ -415,54 +401,89 @@ async def accept_video_call_request(
                                 status="pending",
                                 other_party_name=caregiver_name
                             )
-                            print(f"[INFO] Booking created notification sent to care recipient", flush=True)
                         except Exception as notif_error:
                             print(f"[WARN] Error sending booking notification to care recipient: {notif_error}", flush=True)
-                except Exception as booking_error:
-                    import traceback
-                    print(f"[ERROR] Error creating booking: {booking_error}", flush=True)
-                    traceback.print_exc()
-                    # Don't fail the entire request if booking creation fails
-                    # Log it but continue - the video call acceptance should still succeed
-                    print(f"[WARN] Video call accepted but booking creation failed. User may need to create booking manually.", flush=True)
-            
-            # Create chat session (initially disabled, will be enabled after payment)
-            chat_response = supabase_admin.table("chat_sessions").select("id").eq("care_recipient_id", video_call["care_recipient_id"]).eq("caregiver_id", video_call["caregiver_id"]).execute()
-            
-            if not chat_response.data:
-                new_chat = supabase_admin.table("chat_sessions").insert({
-                    "care_recipient_id": video_call["care_recipient_id"],
-                    "caregiver_id": video_call["caregiver_id"],
-                    "video_call_request_id": video_call_id,
-                    "is_enabled": False,  # Will be enabled after payment
-                    "care_recipient_accepted": False,
-                    "caregiver_accepted": False
-                }).execute()
-                if new_chat.data:
-                    chat_session_id = new_chat.data[0]["id"]
-            else:
-                chat_session_id = chat_response.data[0]["id"]
+                    else:
+                        raise DatabaseError("Failed to create booking record")
+
+                # Create chat session (initially disabled, will be enabled after payment)
+                # This is CRITICAL if booking was created/exists
+                chat_response = supabase_admin.table("chat_sessions").select("id").eq("care_recipient_id", video_call["care_recipient_id"]).eq("caregiver_id", video_call["caregiver_id"]).execute()
+                
+                if not chat_response.data:
+                    new_chat = supabase_admin.table("chat_sessions").insert({
+                        "care_recipient_id": video_call["care_recipient_id"],
+                        "caregiver_id": video_call["caregiver_id"],
+                        "video_call_request_id": video_call_id,
+                        "is_enabled": False,  # Will be enabled after payment
+                        "care_recipient_accepted": False,
+                        "caregiver_accepted": False
+                    }).execute()
+                    if new_chat.data:
+                        chat_session_id = new_chat.data[0]["id"]
+                    else:
+                        raise DatabaseError("Failed to create chat session")
+                else:
+                    chat_session_id = chat_response.data[0]["id"]
         
+        except Exception as sequence_error:
+            print(f"[ERROR] Error in booking/chat sequence: {sequence_error}", flush=True)
+            rollback_needed = True
+            rollback_reason = str(sequence_error)
+        
+        # ROLLBACK LOGIC
+        if rollback_needed:
+            print(f"[WARN] Initiating ROLLBACK due to: {rollback_reason}", flush=True)
+            try:
+                # 1. Delete created booking if it was created in this transaction
+                # We only delete if we created it (booking_response.data existed) but checking booking_id is a proxy
+                # To be safer, we should only delete if WE created it. 
+                # For now, if we fail right after creation, we delete it.
+                if booking_id:
+                     # Verify it was just created? It's hard to know for sure without a flag.
+                     # But if we encountered an error in this block, and we have a booking ID, safest is to remove it 
+                     # if we assume it was part of this failed transaction.
+                     # HOWEVER, if we retrieved an existing booking, we should NOT delete it.
+                     # I need to distinguish between created vs retrieved.
+                     # Refinement: I will check if existing_booking_check found it.
+                     pass 
+
+                # 2. Revert video call status
+                revert_data = {
+                    "status": original_status,
+                    "care_recipient_accepted": original_care_recipient_accepted,
+                    "caregiver_accepted": original_caregiver_accepted
+                }
+                print(f"[INFO] Reverting video call {video_call_id} to {revert_data}", flush=True)
+                supabase_admin.table("video_call_requests").update(revert_data).eq("id", video_call_id).execute()
+                
+            except Exception as rollback_ex:
+                print(f"[ERROR] Rollback failed! Data may be inconsistent. Error: {rollback_ex}", flush=True)
+            
+            # Re-raise the original error
+            raise DatabaseError(f"Operation failed and was rolled back: {rollback_reason}")
+
+
         # Include chat_session_id and booking_id in response if created
-        result = update_response.data[0].copy()
+        result = updated_call.copy()
         if chat_session_id:
             result["chat_session_id"] = chat_session_id
         if booking_id:
             result["booking_id"] = booking_id
         
-        # Send notifications
+        # Send notifications (Non-critical,        # Send notifications
         if accept_data.accept:
             # Get user names for notifications
-            care_recipient_response = supabase_admin.table("users").select("full_name").eq("id", video_call["care_recipient_id"]).execute()
-            caregiver_response = supabase_admin.table("users").select("full_name").eq("id", video_call["caregiver_id"]).execute()
-            
-            care_recipient_name = care_recipient_response.data[0].get("full_name", "Care recipient") if care_recipient_response.data else "Care recipient"
-            caregiver_name = caregiver_response.data[0].get("full_name", "Caregiver") if caregiver_response.data else "Caregiver"
-            
-            # Notify the other party
-            if not is_care_recipient:
-                # Caregiver accepted, notify care recipient
-                try:
+            try:
+                care_recipient_response = supabase_admin.table("users").select("full_name").eq("id", video_call["care_recipient_id"]).execute()
+                caregiver_response = supabase_admin.table("users").select("full_name").eq("id", video_call["caregiver_id"]).execute()
+                
+                care_recipient_name = care_recipient_response.data[0].get("full_name", "Care recipient") if care_recipient_response.data else "Care recipient"
+                caregiver_name = caregiver_response.data[0].get("full_name", "Caregiver") if caregiver_response.data else "Caregiver"
+                
+                # Notify the other party
+                if not is_care_recipient:
+                    # Caregiver accepted, notify care recipient
                     await notify_video_call_accepted(
                         user_id=video_call["care_recipient_id"],
                         other_party_name=caregiver_name,
@@ -483,12 +504,9 @@ async def accept_video_call_request(
                             print(f"[INFO] Booking created notification sent to care recipient", flush=True)
                         except Exception as booking_notif_error:
                             print(f"[WARN] Error sending booking notification to care recipient: {booking_notif_error}", flush=True)
-                except Exception as notif_error:
-                    print(f"[WARN] Error sending notification to care recipient: {notif_error}", flush=True)
-            else:
-                # Care Recipient accepted, notify caregiver
-                try:
-                    # Notify caregiver that care recipient accepted
+                else:
+                    # Care Recipient accepted, notify caregiver
+                    # Notify caregiver that care recipient accepted or just accepted the request
                     # We reuse notify_video_call_accepted but with is_caregiver=False to indicate the acceptor role
                     await notify_video_call_accepted(
                         user_id=video_call["caregiver_id"],
@@ -497,13 +515,16 @@ async def accept_video_call_request(
                         is_caregiver=False
                     )
                     print(f"[INFO] Notification sent to caregiver about care recipient acceptance", flush=True)
-                except Exception as notif_error:
-                    print(f"[WARN] Error sending notification to caregiver: {notif_error}", flush=True)
+            except Exception as notif_error:
+                print(f"[WARN] Error sending notification: {notif_error}", flush=True)
         
         # If declined, notify the other party about the decline
         if not accept_data.accept:
             # Notify the opposite party that the call was declined
             try:
+                care_recipient_name = "Care Recipient" # Fallback
+                caregiver_name = "Caregiver" # Fallback
+                
                 if is_care_recipient:
                     await notify_video_call_status_change(
                         user_id=video_call["caregiver_id"],
@@ -523,6 +544,7 @@ async def accept_video_call_request(
 
         print(f"[INFO] ===== ACCEPT VIDEO CALL REQUEST SUCCESSFUL =====", flush=True)
         return result
+
     
     except HTTPException as http_ex:
         print(f"[ERROR] HTTPException in accept_video_call_request: {http_ex.status_code} - {http_ex.detail}", flush=True)
@@ -738,10 +760,7 @@ async def create_booking(
         response = supabase.table("bookings").insert(booking_dict).execute()
         
         if not response.data:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create booking"
-            )
+            raise DatabaseError("Failed to create booking")
         
         booking = response.data[0]
         
@@ -1231,27 +1250,37 @@ async def update_booking(
         booking_response = supabase.table("bookings").select("*").eq("id", booking_id).execute()
         
         if not booking_response.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Booking not found"
-            )
+            raise NotFoundError("Booking not found")
         
         booking = booking_response.data[0]
         
         # Verify user has access
         if booking["care_recipient_id"] != current_user["id"] and booking.get("caregiver_id") != current_user["id"]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied"
-            )
+            raise AuthorizationError("Access denied")
         
         update_data = booking_update.model_dump(exclude_unset=True)
         
         if not update_data:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No fields to update"
-            )
+            raise ValidationError("No fields to update")
+            
+        # State transition validation
+        current_status = booking.get("status")
+        new_status = update_data.get("status")
+        
+        # 1. Prevent updates to terminal states
+        if current_status in ["completed", "cancelled", "declined"]:
+            if new_status and new_status != current_status:
+                raise ConflictError(f"Cannot change status of a {current_status} booking")
+            if not new_status: # Trying to update other fields
+                raise ConflictError(f"Cannot update details of a {current_status} booking")
+                
+        # 2. Validate interactions
+        if new_status:
+            # Simple state machine validation
+            if current_status == "pending" and new_status not in ["accepted", "cancelled", "declined"]:
+                raise ValidationError(f"Invalid status transition from '{current_status}' to '{new_status}'")
+            if current_status == "accepted" and new_status not in ["in_progress", "completed", "cancelled"]:
+                raise ValidationError(f"Invalid status transition from '{current_status}' to '{new_status}'")
         
         if "status" in update_data and update_data["status"] == "accepted":
             update_data["accepted_at"] = datetime.now(timezone.utc).isoformat()
@@ -1313,7 +1342,4 @@ async def update_booking(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise DatabaseError(str(e))

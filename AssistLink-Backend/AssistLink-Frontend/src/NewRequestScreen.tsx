@@ -3,12 +3,26 @@ import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, Dimens
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { api } from './api/client';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useErrorHandler, ErrorDetails } from './hooks/useErrorHandler';
 
 // Conditional imports for native modules (not available on web)
 let Location: any = null;
 let MapView: any = null;
 let Marker: any = null;
 let PROVIDER_DEFAULT: any = null;
+
+const ErrorBanner = ({ error, onDismiss }: { error: ErrorDetails | null, onDismiss: () => void }) => {
+  if (!error) return null;
+  return (
+    <View style={styles.errorBanner}>
+      <Icon name="alert-circle" size={20} color="#FFF" />
+      <Text style={styles.errorText}>{error.message}</Text>
+      <TouchableOpacity onPress={onDismiss}>
+        <Icon name="close" size={20} color="#FFF" />
+      </TouchableOpacity>
+    </View>
+  );
+};
 
 // Import expo-location (works on native platforms)
 if (Platform.OS !== 'web') {
@@ -28,7 +42,7 @@ try {
     MapView = Maps.default || Maps.MapView || Maps;
     Marker = Maps.Marker;
     PROVIDER_DEFAULT = Maps.PROVIDER_DEFAULT;
-    
+
     // Check if this is the mock: mock sets PROVIDER_DEFAULT to undefined
     // Real react-native-maps would have a PROVIDER_DEFAULT value
     if (PROVIDER_DEFAULT === undefined && MapView && typeof MapView === 'function') {
@@ -52,7 +66,7 @@ if (!MapView) {
         Map View Unavailable
       </Text>
       <Text style={{ color: '#6B7280', fontSize: 14, marginTop: 8, textAlign: 'center', paddingHorizontal: 20, lineHeight: 20 }}>
-        {Platform.OS === 'web' 
+        {Platform.OS === 'web'
           ? 'Map features are only available on mobile devices. Please use the Android app for full functionality.'
           : 'Map features require a development build and are not available in Expo Go. Please build the app using "npx expo run:android" to enable map features.'}
       </Text>
@@ -100,8 +114,9 @@ const MONTH_NAMES = [
 type TabType = 'exam' | 'daily' | 'urgent';
 
 const NewRequestScreen = ({ navigation }: any) => {
+  const { error, handleError, clearError } = useErrorHandler();
   const [activeTab, setActiveTab] = useState<TabType>('exam');
-  
+
   // Animation Value: 0 = Exam, 1 = Daily, 2 = Urgent
   const slideAnim = useRef(new Animated.Value(0)).current;
 
@@ -136,13 +151,13 @@ const NewRequestScreen = ({ navigation }: any) => {
   const [pickerStep, setPickerStep] = useState<'date' | 'startTime' | 'endTime'>('date');
   const [currentPickingMode, setCurrentPickingMode] = useState<'exam' | 'daily'>('exam');
   const [pickingTimeType, setPickingTimeType] = useState<'startTime' | 'endTime'>('startTime');
-  
+
   // Exam date & time states
   const [examDate, setExamDate] = useState<string>('');
   const [examStartTime, setExamStartTime] = useState<string>('');
   const [examEndTime, setExamEndTime] = useState<string>('');
   const [examDuration, setExamDuration] = useState<string>('');
-  
+
   // Daily date & time states
   const [dailyDate, setDailyDate] = useState<string>('');
   const [dailyStartTime, setDailyStartTime] = useState<string>('');
@@ -180,7 +195,7 @@ const NewRequestScreen = ({ navigation }: any) => {
     const month = MONTH_NAMES[viewDate.getMonth()].substring(0, 3);
     const dateStr = `${month} ${day}, ${year}`;
     setTempDate(dateStr);
-    
+
     if (currentPickingMode === 'exam') {
       setExamDate(dateStr);
       setPickerStep('startTime');
@@ -225,7 +240,7 @@ const NewRequestScreen = ({ navigation }: any) => {
 
   const calculateDuration = (startTime: string, endTime: string, mode: 'exam' | 'daily' = 'exam') => {
     if (!startTime || !endTime) return;
-    
+
     // Parse time strings (e.g., "08:00 AM" or "02:00 PM")
     const parseTime = (timeStr: string): number => {
       const [time, period] = timeStr.split(' ');
@@ -238,7 +253,7 @@ const NewRequestScreen = ({ navigation }: any) => {
 
     const startMinutes = parseTime(startTime);
     const endMinutes = parseTime(endTime);
-    
+
     let durationMinutes: number;
     if (endMinutes < startMinutes) {
       // End time is next day
@@ -246,11 +261,11 @@ const NewRequestScreen = ({ navigation }: any) => {
     } else {
       durationMinutes = endMinutes - startMinutes;
     }
-    
+
     const hours = Math.floor(durationMinutes / 60);
     const minutes = durationMinutes % 60;
     const durationText = minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
-    
+
     if (mode === 'exam') {
       setExamDuration(durationText);
     } else {
@@ -259,6 +274,29 @@ const NewRequestScreen = ({ navigation }: any) => {
   };
 
   const goToMatchmaking = () => {
+    clearError();
+
+    // VALIDATION
+    try {
+      if (activeTab === 'exam') {
+        if (!examDate) throw new Error("Please select an exam date.");
+        if (!examStartTime) throw new Error("Please select a start time.");
+        if (!examEndTime) throw new Error("Please select an end time.");
+        if (!locationText && !selectedLocation) throw new Error("Please select a location.");
+      } else if (activeTab === 'daily') {
+        if (!dailyDate) throw new Error("Please select a date.");
+        if (!dailyStartTime) throw new Error("Please select a start time.");
+        if (!dailyEndTime) throw new Error("Please select an end time.");
+        if (!locationText && !selectedLocation) throw new Error("Please select a location.");
+      } else if (activeTab === 'urgent') {
+        if (!selectedUrgency) throw new Error("Please select the nature of the emergency.");
+        if (!selectedLocation) throw new Error("Location makes finding caregivers easier. Please enable location or select one.");
+      }
+    } catch (err: any) {
+      handleError(err, 'validation');
+      return;
+    }
+
     // Build a simple payload to help filter caregivers and pre-fill booking
     const payload: any = {
       serviceType: activeTab === 'exam' ? 'exam_assistance' : activeTab === 'daily' ? 'daily_care' : 'one_time',
@@ -296,16 +334,16 @@ const NewRequestScreen = ({ navigation }: any) => {
           <View key={`start-${i}`} style={[styles.calendarCell, { backgroundColor: 'transparent' }]} />
         ))}
         {daysArray.map((day) => (
-          <TouchableOpacity 
-            key={day} 
-            style={styles.calendarCell} 
+          <TouchableOpacity
+            key={day}
+            style={styles.calendarCell}
             onPress={() => handleDateSelect(day)}
           >
             <Text style={styles.calendarDateText}>{day}</Text>
           </TouchableOpacity>
         ))}
         {trailingFillers.map((_, i) => (
-            <View key={`end-${i}`} style={[styles.calendarCell, { backgroundColor: 'transparent' }]} />
+          <View key={`end-${i}`} style={[styles.calendarCell, { backgroundColor: 'transparent' }]} />
         ))}
       </View>
     );
@@ -325,7 +363,7 @@ const NewRequestScreen = ({ navigation }: any) => {
                   {MONTH_NAMES[viewDate.getMonth()]} {viewDate.getFullYear()}
                 </Text>
                 <TouchableOpacity onPress={() => changeMonth(1)} style={styles.navArrow}>
-                    <Icon name="chevron-right" size={28} color={COLORS.darkText} />
+                  <Icon name="chevron-right" size={28} color={COLORS.darkText} />
                 </TouchableOpacity>
               </View>
             ) : (
@@ -351,7 +389,7 @@ const NewRequestScreen = ({ navigation }: any) => {
                     if (period === 'AM' && h === 12) total -= 12 * 60;
                     return total;
                   };
-                  
+
                   const startTime = currentPickingMode === 'exam' ? examStartTime : dailyStartTime;
                   if (startTime) {
                     const startMinutes = parseTime(startTime);
@@ -359,10 +397,10 @@ const NewRequestScreen = ({ navigation }: any) => {
                     isDisabled = timeMinutes <= startMinutes;
                   }
                 }
-                
+
                 return (
-                  <TouchableOpacity 
-                    key={time} 
+                  <TouchableOpacity
+                    key={time}
                     style={[styles.timeOption, isDisabled && styles.timeOptionDisabled]}
                     onPress={() => !isDisabled && handleTimeSelect(time)}
                     disabled={isDisabled}
@@ -382,18 +420,18 @@ const NewRequestScreen = ({ navigation }: any) => {
   const renderTabs = () => (
     <View style={styles.tabContainer}>
       <Text style={styles.sectionTitle}>Service Type</Text>
-      
+
       {/* Tab Bar Container */}
       <View style={styles.tabBar}>
         {/* Animated Sliding Indicator */}
-        <Animated.View 
+        <Animated.View
           style={[
-            styles.animatedIndicator, 
-            { 
+            styles.animatedIndicator,
+            {
               transform: [{ translateX }],
               backgroundColor: backgroundColor
             }
-          ]} 
+          ]}
         />
 
         {['exam', 'daily', 'urgent'].map((tab) => {
@@ -405,16 +443,16 @@ const NewRequestScreen = ({ navigation }: any) => {
               onPress={() => setActiveTab(tab as TabType)}
               activeOpacity={0.8}
             >
-              <Icon 
-                name={tab === 'exam' ? 'book-open-page-variant' : tab === 'daily' ? 'hand-heart' : 'alarm-light'} 
-                size={20} 
+              <Icon
+                name={tab === 'exam' ? 'book-open-page-variant' : tab === 'daily' ? 'hand-heart' : 'alarm-light'}
+                size={20}
                 // Color changes based on active state
-                color={isActive ? COLORS.white : COLORS.grayText} 
+                color={isActive ? COLORS.white : COLORS.grayText}
               />
               <Text style={[
-                  styles.tabText, 
-                  isActive && styles.activeTabText
-                ]}>
+                styles.tabText,
+                isActive && styles.activeTabText
+              ]}>
                 {tab.charAt(0).toUpperCase() + tab.slice(1)}
               </Text>
             </TouchableOpacity>
@@ -515,8 +553,7 @@ const NewRequestScreen = ({ navigation }: any) => {
         }, 1000);
       }
     } catch (error: any) {
-      console.error('Error getting location:', error);
-      Alert.alert('Error', 'Failed to get your current location. Please try again.');
+      handleError(error, 'location-error');
     } finally {
       setLocationLoading(false);
     }
@@ -557,9 +594,9 @@ const NewRequestScreen = ({ navigation }: any) => {
       <Text style={styles.sectionLabel}>Location</Text>
       <View style={styles.locationInputContainer}>
         <Icon name="map-marker" size={20} color={COLORS.primaryGreen} style={{ marginRight: 8 }} />
-        <TextInput 
-          style={styles.locationInput} 
-          placeholder="Campus Center, Room 304" 
+        <TextInput
+          style={styles.locationInput}
+          placeholder="Campus Center, Room 304"
           placeholderTextColor={COLORS.grayText}
           value={locationText}
           onChangeText={setLocationText}
@@ -617,20 +654,20 @@ const NewRequestScreen = ({ navigation }: any) => {
         <Text style={styles.subLabel}>Assistance Required</Text>
         <View style={styles.gridContainer}>
           {['scribe', 'reader'].map((type) => (
-            <TouchableOpacity 
+            <TouchableOpacity
               key={type}
               style={[styles.gridButton, selectedAssistance === type && styles.gridButtonActive]}
               onPress={() => setSelectedAssistance(type)}
             >
-              <Icon 
-                name={type === 'scribe' ? 'fountain-pen-tip' : 'account-voice'} 
-                size={24} 
-                color={selectedAssistance === type ? COLORS.darkText : COLORS.grayText} 
+              <Icon
+                name={type === 'scribe' ? 'fountain-pen-tip' : 'account-voice'}
+                size={24}
+                color={selectedAssistance === type ? COLORS.darkText : COLORS.grayText}
               />
               <Text style={styles.gridButtonText}>
                 {type.charAt(0).toUpperCase() + type.slice(1)}
               </Text>
-              {selectedAssistance === type && 
+              {selectedAssistance === type &&
                 <Icon name="check-circle" size={16} color={COLORS.primaryGreen} style={styles.checkIcon} />
               }
             </TouchableOpacity>
@@ -640,13 +677,13 @@ const NewRequestScreen = ({ navigation }: any) => {
 
       <View style={styles.section}>
         <Text style={styles.sectionLabel}>Schedule</Text>
-        
+
         <Text style={styles.subLabel}>Exam Date</Text>
-        <TouchableOpacity 
-          style={styles.inputContainer} 
+        <TouchableOpacity
+          style={styles.inputContainer}
           onPress={() => openPicker('exam', 'date')}
         >
-          <Text style={[styles.inputText, !examDate && {color: COLORS.grayText}]}>
+          <Text style={[styles.inputText, !examDate && { color: COLORS.grayText }]}>
             {examDate || 'Select Date'}
           </Text>
           <Icon name="calendar" size={20} color={COLORS.primaryGreen} />
@@ -655,12 +692,12 @@ const NewRequestScreen = ({ navigation }: any) => {
         <View style={styles.timeRow}>
           <View style={styles.timeInputContainer}>
             <Text style={styles.subLabel}>Start Time</Text>
-            <TouchableOpacity 
-              style={styles.inputContainer} 
+            <TouchableOpacity
+              style={styles.inputContainer}
               onPress={() => openPicker('exam', 'startTime')}
               disabled={!examDate}
             >
-              <Text style={[styles.inputText, !examStartTime && {color: COLORS.grayText}]}>
+              <Text style={[styles.inputText, !examStartTime && { color: COLORS.grayText }]}>
                 {examStartTime || 'Select Start Time'}
               </Text>
               <Icon name="clock-outline" size={20} color={COLORS.primaryGreen} />
@@ -669,12 +706,12 @@ const NewRequestScreen = ({ navigation }: any) => {
 
           <View style={styles.timeInputContainer}>
             <Text style={styles.subLabel}>End Time</Text>
-            <TouchableOpacity 
-              style={styles.inputContainer} 
+            <TouchableOpacity
+              style={styles.inputContainer}
               onPress={() => openPicker('exam', 'endTime')}
               disabled={!examStartTime}
             >
-              <Text style={[styles.inputText, !examEndTime && {color: COLORS.grayText}]}>
+              <Text style={[styles.inputText, !examEndTime && { color: COLORS.grayText }]}>
                 {examEndTime || 'Select End Time'}
               </Text>
               <Icon name="clock-outline" size={20} color={COLORS.primaryGreen} />
@@ -703,13 +740,13 @@ const NewRequestScreen = ({ navigation }: any) => {
     <>
       <View style={styles.section}>
         <Text style={styles.sectionLabel}>Schedule</Text>
-        
+
         <Text style={styles.subLabel}>Date</Text>
-        <TouchableOpacity 
-          style={styles.inputContainer} 
+        <TouchableOpacity
+          style={styles.inputContainer}
           onPress={() => openPicker('daily', 'date')}
         >
-          <Text style={[styles.inputText, !dailyDate && {color: COLORS.grayText}]}>
+          <Text style={[styles.inputText, !dailyDate && { color: COLORS.grayText }]}>
             {dailyDate || 'Select Date'}
           </Text>
           <Icon name="calendar" size={20} color={COLORS.primaryGreen} />
@@ -718,12 +755,12 @@ const NewRequestScreen = ({ navigation }: any) => {
         <View style={styles.timeRow}>
           <View style={styles.timeInputContainer}>
             <Text style={styles.subLabel}>Start Time</Text>
-            <TouchableOpacity 
-              style={styles.inputContainer} 
+            <TouchableOpacity
+              style={styles.inputContainer}
               onPress={() => openPicker('daily', 'startTime')}
               disabled={!dailyDate}
             >
-              <Text style={[styles.inputText, !dailyStartTime && {color: COLORS.grayText}]}>
+              <Text style={[styles.inputText, !dailyStartTime && { color: COLORS.grayText }]}>
                 {dailyStartTime || 'Select Start Time'}
               </Text>
               <Icon name="clock-outline" size={20} color={COLORS.primaryGreen} />
@@ -732,12 +769,12 @@ const NewRequestScreen = ({ navigation }: any) => {
 
           <View style={styles.timeInputContainer}>
             <Text style={styles.subLabel}>End Time</Text>
-            <TouchableOpacity 
-              style={styles.inputContainer} 
+            <TouchableOpacity
+              style={styles.inputContainer}
               onPress={() => openPicker('daily', 'endTime')}
               disabled={!dailyStartTime}
             >
-              <Text style={[styles.inputText, !dailyEndTime && {color: COLORS.grayText}]}>
+              <Text style={[styles.inputText, !dailyEndTime && { color: COLORS.grayText }]}>
                 {dailyEndTime || 'Select End Time'}
               </Text>
               <Icon name="clock-outline" size={20} color={COLORS.primaryGreen} />
@@ -752,9 +789,9 @@ const NewRequestScreen = ({ navigation }: any) => {
           </View>
         )}
       </View>
-      
+
       {renderLocationSection()}
-      
+
       <TouchableOpacity style={styles.mainButton} onPress={goToMatchmaking}>
         <Text style={styles.mainButtonText}>Find Caregiver</Text>
         <Icon name="magnify" size={24} color="white" style={{ marginLeft: 8 }} />
@@ -785,27 +822,27 @@ const NewRequestScreen = ({ navigation }: any) => {
         <Text style={styles.sectionLabel}>Nature of Emergency</Text>
         <View style={styles.gridContainer}>
           {['Fall', 'Pain'].map((type) => (
-              <TouchableOpacity 
-                key={type}
-                style={[
-                  styles.gridButton, 
-                  styles.urgentGridButton,
-                  selectedUrgency === type && styles.urgentGridButtonActive
-                ]}
-                onPress={() => setSelectedUrgency(type)}
-              >
-                <Icon 
-                  name={type === 'Fall' ? 'human-wheelchair' : 'bandage'} 
-                  size={32} 
-                  color={selectedUrgency === type ? COLORS.white : "#D93025"} 
-                />
-                <Text style={[
-                  styles.urgentGridText, 
-                  selectedUrgency === type && { color: COLORS.white }
-                ]}>
-                  {type}
-                </Text>
-              </TouchableOpacity>
+            <TouchableOpacity
+              key={type}
+              style={[
+                styles.gridButton,
+                styles.urgentGridButton,
+                selectedUrgency === type && styles.urgentGridButtonActive
+              ]}
+              onPress={() => setSelectedUrgency(type)}
+            >
+              <Icon
+                name={type === 'Fall' ? 'human-wheelchair' : 'bandage'}
+                size={32}
+                color={selectedUrgency === type ? COLORS.white : "#D93025"}
+              />
+              <Text style={[
+                styles.urgentGridText,
+                selectedUrgency === type && { color: COLORS.white }
+              ]}>
+                {type}
+              </Text>
+            </TouchableOpacity>
           ))}
         </View>
       </View>
@@ -813,8 +850,8 @@ const NewRequestScreen = ({ navigation }: any) => {
       {renderLocationSection()}
 
       {/* UPDATED: Navigates to EmergencyScreen */}
-      <TouchableOpacity 
-        style={styles.sosButton} 
+      <TouchableOpacity
+        style={styles.sosButton}
         onPress={() => navigation.navigate('EmergencyScreen', {
           location: selectedLocation,
           locationText,
@@ -830,19 +867,21 @@ const NewRequestScreen = ({ navigation }: any) => {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" />
-      
+
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Icon name="arrow-left" size={24} color={COLORS.darkText} />
+          <Icon name="arrow-left" size={24} color={COLORS.darkText} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>New Request</Text>
         <TouchableOpacity>
-            <Text style={styles.resetText}>Reset</Text>
+          <Text style={styles.resetText}>Reset</Text>
         </TouchableOpacity>
       </View>
 
-      <ScrollView 
-        contentContainerStyle={styles.scrollContent} 
+      <ErrorBanner error={error} onDismiss={clearError} />
+
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
         {renderTabs()}
@@ -858,32 +897,32 @@ const NewRequestScreen = ({ navigation }: any) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
-  header: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center', 
-    paddingHorizontal: 20, 
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
     paddingBottom: 10,
-    paddingTop: Platform.OS === 'android' ? 40 : 10, 
-    backgroundColor: COLORS.background 
+    paddingTop: Platform.OS === 'android' ? 40 : 10,
+    backgroundColor: COLORS.background
   },
   headerTitle: { fontSize: 20, fontWeight: 'bold', color: COLORS.darkText },
   backButton: { padding: 8, marginLeft: -8 },
   resetText: { color: COLORS.primaryGreen, fontWeight: '600', fontSize: 16 },
-  
-  scrollContent: { 
+
+  scrollContent: {
     paddingHorizontal: 20,
     paddingTop: 20,
-    paddingBottom: 150, 
+    paddingBottom: 150,
   },
-  
+
   // Tabs with Animation
   tabContainer: { marginBottom: 24 },
-  tabBar: { 
-    flexDirection: 'row', 
-    backgroundColor: '#EAEAEA', 
-    borderRadius: 12, 
-    padding: TAB_BAR_PADDING, 
+  tabBar: {
+    flexDirection: 'row',
+    backgroundColor: '#EAEAEA',
+    borderRadius: 12,
+    padding: TAB_BAR_PADDING,
     marginTop: 8,
     position: 'relative' // Needed for absolute positioning of animated view
   },
@@ -901,42 +940,42 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2
   },
-  tabButton: { 
-    flex: 1, 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'center', 
-    paddingVertical: 10, 
+  tabButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
     borderRadius: 10,
     zIndex: 1 // Ensure text sits above the animated background
   },
   // Removed static 'activeTabGreen' style
   tabText: { fontWeight: '600', fontSize: 14, color: COLORS.grayText, marginLeft: 4 },
   activeTabText: { color: 'white' },
-  
+
   // General Sections
   section: { marginBottom: 24 },
   sectionLabel: { fontSize: 18, fontWeight: 'bold', color: COLORS.darkText, marginBottom: 12 },
   sectionTitle: { fontSize: 18, fontWeight: 'bold', color: COLORS.darkText, marginBottom: 4 },
   subLabel: { fontSize: 14, color: COLORS.darkText, marginBottom: 8, fontWeight: '500' },
-  
+
   // Inputs
   inputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.primaryGreenLight, borderRadius: 12, paddingHorizontal: 16, height: 50 },
   input: { flex: 1, color: COLORS.darkText, fontSize: 16 },
   inputText: { flex: 1, fontSize: 16, color: COLORS.darkText },
-  
+
   // Grid Buttons
   gridContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 12 },
   gridButton: { width: (width - 52) / 2, backgroundColor: COLORS.primaryGreenLight, padding: 16, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', height: 60 },
   gridButtonActive: { backgroundColor: '#D1FAE5', borderWidth: 1, borderColor: COLORS.primaryGreen }, // UPDATED to match
   gridButtonText: { fontSize: 16, fontWeight: '600', color: COLORS.darkText, marginLeft: 8 },
   checkIcon: { position: 'absolute', top: 8, right: 8 },
-  
+
   // Urgent Specific
   urgentGridButton: { backgroundColor: '#F3F4F6', flexDirection: 'column', height: 100 },
-  urgentGridButtonActive: { backgroundColor: '#DC2626' }, 
+  urgentGridButtonActive: { backgroundColor: '#DC2626' },
   urgentGridText: { fontSize: 16, fontWeight: '600', color: COLORS.darkText, marginTop: 8, marginLeft: 0 },
-  
+
   // Location
   locationInputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.primaryGreenLight, borderTopLeftRadius: 12, borderTopRightRadius: 12, paddingHorizontal: 16, height: 50 },
   locationInput: { flex: 1, fontSize: 16, color: COLORS.darkText },
@@ -946,13 +985,13 @@ const styles = StyleSheet.create({
   mapOverlay: { position: 'absolute', bottom: 10, left: 10, right: 10, backgroundColor: 'rgba(0,0,0,0.7)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
   mapOverlayText: { color: 'white', fontSize: 12, fontWeight: '500' },
   markerContainer: { alignItems: 'center', justifyContent: 'center' },
-  
+
   // Buttons
   mainButton: { backgroundColor: COLORS.primaryGreen, height: 56, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 12, shadowColor: COLORS.primaryGreen, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
   mainButtonText: { color: 'white', fontSize: 18, fontWeight: 'bold' },
   sosButton: { backgroundColor: '#DC2626', height: 56, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 12, elevation: 4 },
   sosButtonText: { color: 'white', fontSize: 18, fontWeight: 'bold' },
-  
+
   // Emergency Banner
   emergencyBanner: { backgroundColor: '#DC2626', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: 12, marginBottom: 16 },
   emergencyBannerText: { color: 'white', fontSize: 18, fontWeight: 'bold', marginLeft: 8 },
@@ -977,20 +1016,36 @@ const styles = StyleSheet.create({
   timeOptionDisabled: { opacity: 0.4 },
   timeText: { fontSize: 16, color: COLORS.darkText },
   timeTextDisabled: { color: COLORS.border },
-  
+
   // Exam time row
   timeRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, marginTop: 8 },
   timeInputContainer: { flex: 1 },
-  durationContainer: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    marginTop: 12, 
-    padding: 12, 
-    backgroundColor: COLORS.primaryGreenLight, 
+  durationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: COLORS.primaryGreenLight,
     borderRadius: 8,
     gap: 8
   },
   durationText: { fontSize: 16, fontWeight: '600', color: COLORS.primaryGreen },
+
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EF4444',
+    padding: 10,
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderRadius: 8,
+  },
+  errorText: {
+    color: '#FFF',
+    marginLeft: 8,
+    flex: 1,
+    fontSize: 14,
+  },
 });
 
 export default NewRequestScreen;

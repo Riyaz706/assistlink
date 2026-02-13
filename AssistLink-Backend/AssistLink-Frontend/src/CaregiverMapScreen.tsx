@@ -111,8 +111,44 @@ interface CaregiverMapScreenProps {
   navigation?: any;
 }
 
+import { useErrorHandler, ErrorDetails } from './hooks/useErrorHandler';
+
+const ErrorBanner = ({
+  error,
+  onDismiss,
+  onAction,
+  actionLabel
+}: {
+  error: ErrorDetails | null,
+  onDismiss: () => void,
+  onAction?: () => void,
+  actionLabel?: string
+}) => {
+  if (!error) return null;
+  return (
+    <View style={styles.errorBanner}>
+      <Icon name="alert-circle" size={20} color="#FFF" />
+      <Text style={styles.errorText}>{error.message}</Text>
+      {onAction && actionLabel && (
+        <TouchableOpacity onPress={onAction} style={styles.errorActionBtn}>
+          <Text style={styles.errorActionText}>{actionLabel}</Text>
+        </TouchableOpacity>
+      )}
+      <TouchableOpacity onPress={onDismiss} style={styles.errorCloseBtn}>
+        <Icon name="close" size={20} color="#FFF" />
+      </TouchableOpacity>
+    </View>
+  );
+};
+
+// ... (existing imports)
+
+// ...
+
 export default function CaregiverMapScreen({ route, navigation }: CaregiverMapScreenProps) {
   const insets = useSafeAreaInsets();
+  const { handleError, error, clearError } = useErrorHandler();
+
   // Mock recipient location (can be passed via route params)
   const recipientLocation = route?.params?.recipientLocation || {
     latitude: 17.3850, // Hyderabad coordinates
@@ -130,12 +166,12 @@ export default function CaregiverMapScreen({ route, navigation }: CaregiverMapSc
 
   // State for location permission
   const [locationPermission, setLocationPermission] = useState<boolean>(false);
-  const [locationError, setLocationError] = useState<string | null>(null);
+  // locationError removed - using useErrorHandler
 
   // State for route data
   const [routeData, setRouteData] = useState<RouteData | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
-  const [routeError, setRouteError] = useState<string | null>(null);
+  // routeError removed - using useErrorHandler
 
   // State for location watch subscription
   const locationSubscriptionRef = useRef<any>(null);
@@ -187,10 +223,11 @@ export default function CaregiverMapScreen({ route, navigation }: CaregiverMapSc
   // Request location permission
   const requestLocationPermission = async () => {
     try {
+      clearError();
       // Check if location services are enabled
       const servicesEnabled = await Location.hasServicesEnabledAsync();
       if (!servicesEnabled) {
-        setLocationError('Location services are disabled. Please enable GPS.');
+        handleError(new Error('Location services are disabled. Please enable GPS.'), 'location');
         Alert.alert(
           'Location Services Disabled',
           'Please enable location services in your device settings.',
@@ -203,29 +240,24 @@ export default function CaregiverMapScreen({ route, navigation }: CaregiverMapSc
       const { status } = await Location.requestForegroundPermissionsAsync();
 
       if (status !== 'granted') {
-        setLocationError('Location permission denied. Cannot track your location.');
+        handleError(new Error('Location permission denied. Cannot track your location.'), 'permission');
         setLocationPermission(false);
-        Alert.alert(
-          'Permission Denied',
-          'Location permission is required to show your position on the map.',
-          [{ text: 'OK' }]
-        );
         return;
       }
 
       setLocationPermission(true);
-      setLocationError(null);
-
-      // Get initial location
       await getCurrentLocation();
-
-      // Start watching location for live updates
       startLocationUpdates();
     } catch (error: any) {
       console.error('[CaregiverMapScreen] Error requesting location permission:', error);
-      setLocationError('Failed to request location permission.');
+      handleError(error, 'location-permission');
       setLocationPermission(false);
     }
+  };
+
+  const handleOpenSettings = () => {
+    Linking.openSettings();
+    clearError();
   };
 
   // Get current location once
@@ -241,7 +273,7 @@ export default function CaregiverMapScreen({ route, navigation }: CaregiverMapSc
       };
 
       setCaregiverLocation(newLocation);
-      setLocationError(null);
+      // setLocationError(null); // removed
 
       // Update map region to show both locations
       updateMapRegion(newLocation, recipientLocation);
@@ -253,7 +285,7 @@ export default function CaregiverMapScreen({ route, navigation }: CaregiverMapSc
       }
     } catch (error: any) {
       console.error('[CaregiverMapScreen] Error getting current location:', error);
-      setLocationError('Failed to get your current location.');
+      handleError(error, 'location-current');
     }
   };
 
@@ -279,7 +311,7 @@ export default function CaregiverMapScreen({ route, navigation }: CaregiverMapSc
         };
 
         setCaregiverLocation(newLocation);
-        setLocationError(null);
+        // setLocationError(null); // removed
         setLastUpdateTime(new Date());
 
         // Update speed if available
@@ -334,7 +366,7 @@ export default function CaregiverMapScreen({ route, navigation }: CaregiverMapSc
     if (!from || !to) return;
 
     setRouteLoading(true);
-    setRouteError(null);
+    // setRouteError(null); // removed - handled by clearError or implicit overlap
 
     try {
       // OSRM API endpoint (FREE, no API key required)
@@ -382,11 +414,11 @@ export default function CaregiverMapScreen({ route, navigation }: CaregiverMapSc
         coordinates,
       });
 
-      setRouteError(null);
+      // setRouteError(null); // removed
       console.log('[CaregiverMapScreen] Route calculated:', { distance, duration, points: coordinates.length });
     } catch (error: any) {
       console.error('[CaregiverMapScreen] Error calculating route:', error);
-      setRouteError('Failed to calculate route. Please check your internet connection.');
+      handleError(error, 'route-calculation');
       setRouteData(null);
     } finally {
       setRouteLoading(false);
@@ -609,19 +641,12 @@ export default function CaregiverMapScreen({ route, navigation }: CaregiverMapSc
       </MapView>
 
       {/* Error Messages */}
-      {locationError && (
-        <View style={styles.errorBanner}>
-          <Icon name="alert-circle" size={20} color={THEME.error} />
-          <Text style={styles.errorText}>{locationError}</Text>
-        </View>
-      )}
-
-      {routeError && (
-        <View style={styles.errorBanner}>
-          <Icon name="alert-circle" size={20} color={THEME.error} />
-          <Text style={styles.errorText}>{routeError}</Text>
-        </View>
-      )}
+      <ErrorBanner
+        error={error}
+        onDismiss={clearError}
+        onAction={error?.type === 'permission' ? handleOpenSettings : undefined}
+        actionLabel={error?.type === 'permission' ? 'Settings' : undefined}
+      />
 
       {/* Bottom Info Card */}
       <View style={styles.infoCard}>
@@ -663,7 +688,7 @@ export default function CaregiverMapScreen({ route, navigation }: CaregiverMapSc
           </>
         )}
 
-        {!routeData && !routeLoading && !routeError && caregiverLocation && (
+        {!routeData && !routeLoading && !error && caregiverLocation && (
           <Text style={styles.noRouteText}>Calculating route...</Text>
         )}
 
@@ -954,7 +979,7 @@ export default function CaregiverMapScreen({ route, navigation }: CaregiverMapSc
           </>
         )}
 
-        {!routeData && !routeLoading && !routeError && caregiverLocation && (
+        {!routeData && !routeLoading && !error && caregiverLocation && (
           <Text style={styles.noRouteText}>Calculating route...</Text>
         )}
 
@@ -1463,22 +1488,40 @@ const styles = StyleSheet.create({
     top: 20,
     left: 20,
     right: 20,
-    backgroundColor: '#FEE2E2',
-    borderRadius: 8,
+    backgroundColor: '#EF4444',
+    borderRadius: 12,
     padding: 12,
     flexDirection: 'row',
     alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 10,
+    zIndex: 2000,
   },
   errorText: {
-    marginLeft: 8,
-    fontSize: 12,
-    color: THEME.error,
+    marginLeft: 10,
+    fontSize: 13,
+    color: '#FFFFFF',
     flex: 1,
+    fontWeight: '500',
+  },
+  errorActionBtn: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    marginLeft: 8,
+  },
+  errorActionText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  errorCloseBtn: {
+    padding: 4,
+    marginLeft: 8,
   },
   backButton: {
     position: 'absolute',

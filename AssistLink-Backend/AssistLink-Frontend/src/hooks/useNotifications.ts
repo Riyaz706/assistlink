@@ -149,6 +149,25 @@ function handleNotificationAction(data: any, navigation?: any) {
             }
             break;
 
+        case 'view_emergency':
+            if (data.emergency_id || data.care_recipient_id) {
+                // Navigate to emergency details or care recipient profile
+                navigation.navigate('EmergencyDetails', {
+                    emergencyId: data.emergency_id || data.care_recipient_id,
+                    careRecipientId: data.care_recipient_id,
+                    location: data.location
+                });
+            }
+            break;
+
+        case 'view_payment':
+            if (data.payment_id) {
+                navigation.navigate('PaymentDetails', {
+                    paymentId: data.payment_id
+                });
+            }
+            break;
+
         default:
             // Navigate to notifications screen
             navigation.navigate('Notifications');

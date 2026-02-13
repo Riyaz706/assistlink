@@ -4,6 +4,7 @@ import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { useAuth } from './context/AuthContext';
 import { api } from './api/client';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useErrorHandler } from './hooks/useErrorHandler';
 
 const { width } = Dimensions.get('window');
 
@@ -61,20 +62,55 @@ const EmergencyScreen = ({ navigation, route }: { navigation: any; route?: any }
     Animated.timing(progressAnim, { toValue: 0, duration: 300, useNativeDriver: false }).start();
   };
 
+  const { handleError } = useErrorHandler();
+  const [locationLoading, setLocationLoading] = useState(false);
+
   const triggerEmergency = async () => {
     Vibration.vibrate([0, 500, 200, 500]); // Vibrate pattern
+    setLocationLoading(true);
+
     try {
+      let locationData = {
+        latitude: 0,
+        longitude: 0,
+        location_name: "Unknown Location",
+        timestamp: new Date().toISOString()
+      };
+
+      try {
+        // Dynamic import to avoid issues on web if not handled
+        const Location = require('expo-location');
+        const { status } = await Location.requestForegroundPermissionsAsync();
+
+        if (status === 'granted') {
+          const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+          locationData = {
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+            location_name: "Current Location", // In a real app, reverse geocode here
+            timestamp: new Date().toISOString()
+          };
+        }
+      } catch (locError) {
+        console.warn("Failed to get location", locError);
+        // Continue without precise location, better to send alert than fail
+      }
+
       // Logic to actually send API request
       await api.triggerEmergency({
-        location: {
-          timestamp: new Date().toISOString(),
-          location_name: "123 Maple Ave"
-        }
+        location: locationData
       });
       setAlertSent(true);
     } catch (error) {
-      console.error("Failed to trigger emergency:", error);
-      Alert.alert("Error", "Failed to send emergency alert. Please call manualy.");
+      handleError(error, 'emergency-trigger');
+      // Always show manual fallback for safety critical features
+      Alert.alert(
+        "Emergency Alert Failed",
+        "Could not send digital alert. PLEASE CALL EMERGENCY SERVICES OR CONTACTS MANUALLY.",
+        [{ text: "OK" }]
+      );
+    } finally {
+      setLocationLoading(false);
     }
   };
 

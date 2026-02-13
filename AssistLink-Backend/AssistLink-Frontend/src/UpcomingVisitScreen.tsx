@@ -1,14 +1,117 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, StatusBar, Dimensions, Image } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, StatusBar, Dimensions, Image, ActivityIndicator, Alert, ScrollView, RefreshControl } from 'react-native';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { api } from './api/client';
+import { useErrorHandler, ErrorDetails } from './hooks/useErrorHandler';
 
 const { width } = Dimensions.get('window');
 const GREEN = "#059669";
 
+const ErrorBanner = ({ error, onDismiss }: { error: ErrorDetails | null, onDismiss: () => void }) => {
+  if (!error) return null;
+  return (
+    <View style={styles.errorBanner}>
+      <Icon name="alert-circle" size={20} color="#FFF" />
+      <Text style={styles.errorText}>{error.message}</Text>
+      <TouchableOpacity onPress={onDismiss}>
+        <Icon name="close" size={20} color="#FFF" />
+      </TouchableOpacity>
+    </View>
+  );
+};
+
 const UpcomingVisitScreen = () => {
   const navigation = useNavigation();
+  const { error, handleError, clearError } = useErrorHandler();
+  const [booking, setBooking] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+
+  const loadUpcomingBooking = useCallback(async () => {
+    try {
+      clearError();
+      const response = await api.getDashboardBookings({ upcoming_only: true, limit: 1 });
+      if (response && Array.isArray(response) && response.length > 0) {
+        setBooking(response[0]);
+      } else {
+        setBooking(null);
+      }
+    } catch (err: any) {
+      handleError(err, 'fetch-upcoming-booking');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [handleError, clearError]);
+
+  useEffect(() => {
+    loadUpcomingBooking();
+  }, [loadUpcomingBooking]);
+
+  const onRefresh = React.useCallback(() => {
+    setRefreshing(true);
+    loadUpcomingBooking();
+  }, [loadUpcomingBooking]);
+
+  const handleCancelVisit = () => {
+    if (!booking) return;
+
+    Alert.alert(
+      "Cancel Visit",
+      "Are you sure you want to cancel this visit?",
+      [
+        { text: "No", style: "cancel" },
+        {
+          text: "Yes, Cancel",
+          style: "destructive",
+          onPress: async () => {
+            setCancelling(true);
+            try {
+              await api.cancelBooking(booking.id);
+              Alert.alert("Success", "Visit cancelled successfully");
+              loadUpcomingBooking(); // Refresh to show empty state or next booking
+            } catch (err: any) {
+              handleError(err, 'cancel-booking');
+            } finally {
+              setCancelling(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleCallCaregiver = () => {
+    // Check if phone number exists in caregiver profile (mock logic replacement)
+    if (booking?.caregiver?.phone) {
+      Alert.alert("Call Caregiver", `Calling ${booking.caregiver.phone}...`);
+    } else {
+      Alert.alert("Info", "Caregiver contact number not available.");
+    }
+  };
+
+  const handleMessageCaregiver = () => {
+    if (booking?.chat_session_id) {
+      // Navigate to chat
+      (navigation as any).navigate('ChatDetailScreen', {
+        chatSessionId: booking.chat_session_id,
+        otherUserName: booking.caregiver?.full_name || 'Caregiver'
+      });
+    } else {
+      Alert.alert("Info", "Chat not enabled for this booking yet.");
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.centerContent]}>
+        <ActivityIndicator size="large" color={GREEN} />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -21,78 +124,112 @@ const UpcomingVisitScreen = () => {
             <Icon name="arrow-left" size={24} color="#000" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Track Caregiver</Text>
-          <View style={{ width: 24 }} /> 
+          <View style={{ width: 24 }} />
         </View>
+        <ErrorBanner error={error} onDismiss={clearError} />
       </SafeAreaView>
 
-      {/* --- MAP PLACEHOLDER --- */}
-      {/* In a real app, use <MapView> here */}
-      <View style={styles.mapContainer}>
-        <View style={styles.mapPlaceholder}>
-           {/* Mock Map Details */}
-           <View style={styles.road} />
-           <View style={[styles.road, { transform: [{ rotate: '90deg' }] }]} />
-           
-           {/* User Location */}
-           <View style={styles.userLocation}>
-             <View style={styles.userDot} />
-           </View>
+      {!booking ? (
+        <ScrollView
+          contentContainerStyle={styles.emptyContainer}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        >
+          <Icon name="calendar-check-outline" size={64} color="#9CA3AF" />
+          <Text style={styles.emptyText}>No upcoming visits found.</Text>
+          <TouchableOpacity style={styles.refreshButton} onPress={onRefresh}>
+            <Text style={styles.refreshButtonText}>Refresh</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      ) : (
+        <>
+          {/* --- MAP PLACEHOLDER --- */}
+          {/* Using mock map for now as real tracking requires complex backend websocket setup not in scope */}
+          <View style={styles.mapContainer}>
+            <View style={styles.mapPlaceholder}>
+              <View style={styles.road} />
+              <View style={[styles.road, { transform: [{ rotate: '90deg' }] }]} />
 
-           {/* Caregiver Location (Car) */}
-           <View style={styles.carLocation}>
-             <Icon name="car" size={24} color="#fff" />
-           </View>
+              <View style={styles.userLocation}>
+                <View style={styles.userDot} />
+              </View>
 
-           <Text style={styles.mapLabel}>Map View Placeholder</Text>
-        </View>
-      </View>
+              <View style={styles.carLocation}>
+                <Icon name="car" size={24} color="#fff" />
+              </View>
 
-      {/* --- BOTTOM SHEET INFO --- */}
-      <View style={styles.bottomSheet}>
-        
-        {/* Time Estimation */}
-        <View style={styles.timeContainer}>
-          <Text style={styles.timeText}>Arriving in 15 mins</Text>
-          <Text style={styles.subTimeText}>10:30 AM • On Time</Text>
-        </View>
-
-        {/* Progress Bar */}
-        <View style={styles.progressContainer}>
-          <View style={styles.progressBar}>
-            <View style={[styles.progressFill, { width: '70%' }]} />
-          </View>
-        </View>
-
-        {/* Caregiver Profile */}
-        <View style={styles.profileRow}>
-          <Image 
-            source={{ uri: 'https://randomuser.me/api/portraits/men/32.jpg' }} 
-            style={styles.avatar} 
-          />
-          <View style={styles.profileInfo}>
-            <Text style={styles.caregiverName}>Michael Johnson</Text>
-            <View style={styles.ratingRow}>
-              <Icon name="star" size={14} color="#FBBF24" />
-              <Text style={styles.ratingText}>4.9 • Nursing Care</Text>
+              <Text style={styles.mapLabel}>
+                {booking.location?.address || "Location Tracking Unavailable"}
+              </Text>
             </View>
           </View>
-          
-          {/* Action Buttons */}
-          <View style={styles.actions}>
-            <TouchableOpacity style={styles.iconBtn}>
-              <Icon name="message-processing-outline" size={22} color={GREEN} />
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.iconBtn, styles.callBtn]}>
-              <Icon name="phone" size={22} color="#fff" />
-            </TouchableOpacity>
-          </View>
-        </View>
 
-        <TouchableOpacity style={styles.cancelButton}>
-          <Text style={styles.cancelText}>Cancel Visit</Text>
-        </TouchableOpacity>
+          {/* --- BOTTOM SHEET INFO --- */}
+          <ScrollView
+            style={styles.bottomSheet}
+            contentContainerStyle={{ paddingBottom: 40 }}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          >
+            {/* Time Estimation */}
+            <View style={styles.timeContainer}>
+              <Text style={styles.timeText}>
+                {new Date(booking.scheduled_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </Text>
+              <Text style={styles.subTimeText}>
+                {new Date(booking.scheduled_date).toDateString()} • {booking.status === 'in_progress' ? 'In Progress' : 'Scheduled'}
+              </Text>
+            </View>
 
-      </View>
+            {/* Progress Bar (Mock for now) */}
+            <View style={styles.progressContainer}>
+              <View style={styles.progressBar}>
+                <View style={[styles.progressFill, { width: booking.status === 'in_progress' ? '50%' : '0%' }]} />
+              </View>
+            </View>
+
+            {/* Caregiver Profile */}
+            <View style={styles.profileRow}>
+              <Image
+                source={{ uri: booking.caregiver?.profile_photo_url || 'https://randomuser.me/api/portraits/men/32.jpg' }}
+                style={styles.avatar}
+              />
+              <View style={styles.profileInfo}>
+                <Text style={styles.caregiverName}>
+                  {booking.caregiver?.full_name || "Assigned Caregiver"}
+                </Text>
+                <View style={styles.ratingRow}>
+                  <Icon name="star" size={14} color="#FBBF24" />
+                  <Text style={styles.ratingText}>
+                    {booking.caregiver?.rating || "5.0"} • {booking.service_type.replace('_', ' ')}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Action Buttons */}
+              <View style={styles.actions}>
+                <TouchableOpacity style={styles.iconBtn} onPress={handleMessageCaregiver}>
+                  <Icon name="message-processing-outline" size={22} color={GREEN} />
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.iconBtn, styles.callBtn]} onPress={handleCallCaregiver}>
+                  <Icon name="phone" size={22} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.cancelButton, cancelling && { opacity: 0.5 }]}
+              onPress={handleCancelVisit}
+              disabled={cancelling}
+            >
+              {cancelling ? (
+                <ActivityIndicator color="#EF4444" />
+              ) : (
+                <Text style={styles.cancelText}>Cancel Visit</Text>
+              )}
+            </TouchableOpacity>
+
+          </ScrollView>
+        </>
+      )}
     </View>
   );
 };
@@ -101,6 +238,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
+  },
+  centerContent: {
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   headerContainer: {
     backgroundColor: '#fff',
@@ -121,6 +262,21 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontWeight: '700',
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EF4444',
+    padding: 10,
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderRadius: 8,
+  },
+  errorText: {
+    color: '#FFF',
+    marginLeft: 8,
+    flex: 1,
+    fontSize: 14,
   },
   // Map Styling
   mapContainer: {
@@ -183,11 +339,10 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
     fontWeight: '600',
   },
-  
+
   // Bottom Sheet Styling
   bottomSheet: {
     backgroundColor: '#fff',
-    padding: 20,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     shadowColor: '#000',
@@ -195,6 +350,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 10,
     elevation: 10,
+    padding: 20,
+    flexGrow: 0,
+    flexBasis: 'auto'
   },
   timeContainer: {
     alignItems: 'center',
@@ -209,6 +367,7 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     fontSize: 14,
     marginTop: 4,
+    textTransform: 'capitalize'
   },
   progressContainer: {
     marginBottom: 24,
@@ -253,6 +412,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6B7280',
     marginLeft: 4,
+    textTransform: 'capitalize'
   },
   actions: {
     flexDirection: 'row',
@@ -278,12 +438,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderTopWidth: 1,
     borderTopColor: '#F3F4F6',
+    marginTop: 10,
   },
   cancelText: {
     color: '#EF4444',
     fontWeight: '600',
     fontSize: 15,
   },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    marginTop: 100,
+  },
+  emptyText: {
+    fontSize: 18,
+    color: '#6B7280',
+    marginTop: 20,
+    textAlign: 'center',
+  },
+  refreshButton: {
+    marginTop: 20,
+    padding: 10,
+    backgroundColor: GREEN,
+    borderRadius: 8,
+  },
+  refreshButtonText: {
+    color: '#FFF',
+    fontWeight: '600',
+  }
 });
 
 export default UpcomingVisitScreen;

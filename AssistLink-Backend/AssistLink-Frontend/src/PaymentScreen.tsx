@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { api } from './api/client';
 import { useAuth } from './context/AuthContext';
+import { useErrorHandler, isNetworkError, retryOperation } from './hooks/useErrorHandler';
 
 const THEME = {
   primary: "#059669",
@@ -11,6 +12,7 @@ const THEME = {
   card: "#FFFFFF",
   text: "#111827",
   subText: "#4B5563",
+  errorRed: "#DC2626",
 };
 
 export default function PaymentScreen({ route, navigation }: any) {
@@ -18,11 +20,15 @@ export default function PaymentScreen({ route, navigation }: any) {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [creatingOrder, setCreatingOrder] = useState(false);
+  const { error, handleError, clearError } = useErrorHandler();
 
   if (!appointment) {
     return (
       <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={{ fontSize: 16, marginBottom: 20 }}>Error: No appointment details found.</Text>
+        <Icon name="alert-circle-outline" size={48} color={THEME.errorRed} />
+        <Text style={{ fontSize: 16, marginBottom: 20, marginTop: 12, textAlign: 'center' }}>
+          Error: No appointment details found.
+        </Text>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.payBtn}>
           <Text style={styles.payText}>Go Back</Text>
         </TouchableOpacity>
@@ -31,25 +37,48 @@ export default function PaymentScreen({ route, navigation }: any) {
   }
 
   const payNow = async () => {
+    clearError();
+
+    // Validate appointment data
+    if (!appointment.id) {
+      handleError(new Error('Invalid appointment: Missing booking ID'), 'payment-validation');
+      return;
+    }
+
+    const amount = appointment.price || appointment.amount || 500;
+    if (amount <= 0) {
+      handleError(new Error('Invalid payment amount'), 'payment-validation');
+      return;
+    }
+
     setCreatingOrder(true);
+
     try {
-      // Step 1: Create payment order (bypasses Razorpay and directly enables chat)
-      const amount = appointment.price || appointment.amount || 500;
+      // Use retry logic for payment order creation
       console.log('[PaymentScreen] Creating payment order for booking:', appointment.id);
-      
-      const orderResponse = await api.createPaymentOrder({
-        booking_id: appointment.id,
-        amount: amount,
-        currency: 'INR'
-      });
+
+      const orderResponse = await retryOperation(
+        () => api.createPaymentOrder({
+          booking_id: appointment.id,
+          amount: amount,
+          currency: 'INR'
+        }),
+        {
+          maxRetries: 2,
+          delayMs: 1000,
+          onRetry: (attempt, error) => {
+            console.log(`[PaymentScreen] Retry attempt ${attempt} for payment order:`, error);
+          }
+        }
+      );
 
       console.log('[PaymentScreen] Payment order created:', orderResponse);
       setCreatingOrder(false);
-      
+
       // If chat_session_id is returned, chat is already enabled (bypass mode)
       if (orderResponse.chat_session_id) {
         Alert.alert(
-          "Success", 
+          "Success",
           "Chat has been enabled successfully!",
           [
             {
@@ -72,7 +101,7 @@ export default function PaymentScreen({ route, navigation }: any) {
       } else {
         // Fallback: If no chat_session_id, try to navigate to chat anyway
         Alert.alert(
-          "Success", 
+          "Success",
           "Payment processed successfully!",
           [
             {
@@ -95,7 +124,21 @@ export default function PaymentScreen({ route, navigation }: any) {
       console.error("[PaymentScreen] Error creating payment order:", e);
       setCreatingOrder(false);
       setLoading(false);
-      Alert.alert("Error", e.message || "Failed to process payment. Please try again.");
+
+      handleError(e, 'payment');
+
+      // Show user-friendly error alert
+      if (isNetworkError(e)) {
+        Alert.alert(
+          "Connection Error",
+          "Unable to process payment. Please check your internet connection and try again."
+        );
+      } else {
+        Alert.alert(
+          "Payment Error",
+          e.message || "Failed to process payment. Please try again."
+        );
+      }
     }
   };
 
@@ -104,7 +147,7 @@ export default function PaymentScreen({ route, navigation }: any) {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-           <Icon name="arrow-left" size={24} color="#000" />
+          <Icon name="arrow-left" size={24} color="#000" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Confirm Payment</Text>
         <View style={{ width: 24 }} />
@@ -113,9 +156,9 @@ export default function PaymentScreen({ route, navigation }: any) {
       <View style={styles.content}>
         <View style={styles.card}>
           {appointment.caregiver?.profile_photo_url ? (
-            <Image 
-              source={{ uri: appointment.caregiver.profile_photo_url }} 
-              style={styles.avatar} 
+            <Image
+              source={{ uri: appointment.caregiver.profile_photo_url }}
+              style={styles.avatar}
             />
           ) : (
             <View style={styles.avatarPlaceholder}>
@@ -157,18 +200,18 @@ export default function PaymentScreen({ route, navigation }: any) {
             <Text style={styles.amount}>₹{appointment.price || 500}</Text>
           </View>
 
-          <TouchableOpacity 
-            style={[styles.payBtn, (loading || creatingOrder) && styles.payBtnDisabled]} 
-            onPress={payNow} 
+          <TouchableOpacity
+            style={[styles.payBtn, (loading || creatingOrder) && styles.payBtnDisabled]}
+            onPress={payNow}
             disabled={loading || creatingOrder}
           >
             {(loading || creatingOrder) ? (
-               <ActivityIndicator color="#fff" />
+              <ActivityIndicator color="#fff" />
             ) : (
-               <Text style={styles.payText}>Pay Now</Text>
+              <Text style={styles.payText}>Pay Now</Text>
             )}
           </TouchableOpacity>
-          
+
           {(creatingOrder || loading) && (
             <Text style={styles.loadingText}>
               {creatingOrder ? 'Creating payment order...' : 'Processing payment...'}
@@ -182,19 +225,19 @@ export default function PaymentScreen({ route, navigation }: any) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: THEME.bg },
-  header: { 
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', 
-    padding: 20, paddingBottom: 10 
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    padding: 20, paddingBottom: 10
   },
   headerTitle: { fontSize: 20, fontWeight: '700', color: '#000' },
-  
+
   content: { padding: 20 },
   card: {
     backgroundColor: THEME.card,
     borderRadius: 20,
     padding: 24,
     alignItems: 'center',
-    shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, 
+    shadowColor: "#000", shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.05, shadowRadius: 10, elevation: 3,
   },
   avatar: { width: 80, height: 80, borderRadius: 40, marginBottom: 12 },
@@ -229,7 +272,7 @@ const styles = StyleSheet.create({
   payBtn: {
     backgroundColor: THEME.primary, width: '100%', paddingVertical: 16,
     borderRadius: 14, alignItems: 'center',
-    shadowColor: THEME.primary, shadowOffset: { width: 0, height: 4 }, 
+    shadowColor: THEME.primary, shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2, shadowRadius: 8, elevation: 4,
   },
   payBtnDisabled: { opacity: 0.7 },

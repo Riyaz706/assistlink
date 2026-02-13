@@ -14,7 +14,17 @@ import json
 from app.database import supabase_admin
 from app.dependencies import get_current_user, verify_care_recipient
 from app.config import settings
-from app.services.notifications import notify_booking_status_change
+from app.services.notifications import (
+    notify_payment_success,
+    notify_payment_received
+)
+from app.error_handler import (
+    AuthenticationError,
+    AuthorizationError,
+    NotFoundError,
+    ValidationError,
+    DatabaseError
+)
 
 router = APIRouter()
 
@@ -137,19 +147,13 @@ async def create_payment_order(
         booking_response = supabase_admin.table("bookings").select("*").eq("id", request.booking_id).execute()
         
         if not booking_response.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Booking not found"
-            )
+            raise NotFoundError("Booking not found", details={"booking_id": request.booking_id})
         
         booking = booking_response.data[0]
         
         # Verify user is the care recipient
         if booking["care_recipient_id"] != current_user["id"]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only care recipient can create payment order"
-            )
+            raise AuthorizationError("Only care recipient can create payment order")
         
         # Check if payment already exists
         if booking.get("payment_status") == "completed":
@@ -183,10 +187,7 @@ async def create_payment_order(
         }).eq("id", request.booking_id).execute()
         
         if not update_response.data:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to update booking"
-            )
+            raise DatabaseError("Failed to update booking")
         
         updated_booking = update_response.data[0]
         
@@ -238,6 +239,7 @@ async def create_payment_order(
             care_recipient_name = care_recipient_response.data[0].get("full_name", "Care recipient") if care_recipient_response.data else "Care recipient"
             caregiver_name = caregiver_response.data[0].get("full_name", "Caregiver") if caregiver_response.data else "Caregiver"
             
+            # Chat enabled notifications
             await notify_chat_enabled(
                 user_id=booking["care_recipient_id"],
                 other_party_name=caregiver_name,
@@ -248,8 +250,25 @@ async def create_payment_order(
                 other_party_name=care_recipient_name,
                 chat_session_id=chat_session_id
             )
+            
+            # Payment success notifications
+            await notify_payment_success(
+                user_id=booking["care_recipient_id"],
+                amount=amount,
+                payment_id=request.booking_id,
+                other_party_name=caregiver_name,
+                is_sender=True
+            )
+            await notify_payment_received(
+                caregiver_id=booking["caregiver_id"],
+                amount=amount,
+                care_recipient_name=care_recipient_name,
+                payment_id=request.booking_id
+            )
+            sys.stderr.write(f"[INFO] Payment notifications sent to both parties\n")
+            sys.stderr.flush()
         except Exception as notif_error:
-            sys.stderr.write(f"[WARN] Error sending chat enabled notification: {notif_error}\n")
+            sys.stderr.write(f"[WARN] Error sending notifications: {notif_error}\n")
             sys.stderr.flush()
         
         sys.stderr.write(f"[INFO] Chat enabled successfully. Chat Session ID: {chat_session_id}\n")
@@ -263,17 +282,14 @@ async def create_payment_order(
             booking_id=request.booking_id
         )
         
-    except HTTPException:
+    except (HTTPException, NotFoundError, AuthorizationError, DatabaseError):
         raise
     except Exception as e:
         import traceback
         sys.stderr.write(f"[ERROR] Error in create_payment_order: {str(e)}\n")
         traceback.print_exc(file=sys.stderr)
         sys.stderr.flush()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create payment order: {str(e)}"
-        )
+        raise DatabaseError(f"Failed to create payment order: {str(e)}")
     
 
 
@@ -293,10 +309,7 @@ async def verify_payment(
     
     razorpay_client = get_razorpay_client()
     if not razorpay_client:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Payment service is not configured"
-        )
+        raise DatabaseError("Payment service is not configured", details={"service": "razorpay"})
     
     try:
         sys.stderr.write(f"[INFO] Verifying payment for order {request.razorpay_order_id}\n")
@@ -306,19 +319,13 @@ async def verify_payment(
         booking_response = supabase_admin.table("bookings").select("*").eq("razorpay_order_id", request.razorpay_order_id).execute()
         
         if not booking_response.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Booking not found for this payment order"
-            )
+            raise NotFoundError("Booking not found for this payment order", details={"order_id": request.razorpay_order_id})
         
         booking = booking_response.data[0]
         
         # Verify user is the care recipient
         if booking["care_recipient_id"] != current_user["id"]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only care recipient can verify payment"
-            )
+            raise AuthorizationError("Only care recipient can verify payment")
         
         # Verify Razorpay signature
         message = f"{request.razorpay_order_id}|{request.razorpay_payment_id}"
@@ -331,10 +338,7 @@ async def verify_payment(
         if generated_signature != request.razorpay_signature:
             sys.stderr.write(f"[ERROR] Payment signature verification failed for order {request.razorpay_order_id}\n")
             sys.stderr.flush()
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid payment signature"
-            )
+            raise ValidationError("Invalid payment signature")
         
         # Verify payment with Razorpay API
         try:
@@ -349,17 +353,11 @@ async def verify_payment(
             sys.stderr.flush()
             
             if payment.get("status") != "captured" and payment.get("status") != "authorized":
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Payment not successful. Status: {payment.get('status')}"
-                )
+                raise ValidationError(f"Payment not successful. Status: {payment.get('status')}")
         except Exception as razorpay_error:
             sys.stderr.write(f"[ERROR] Error fetching payment from Razorpay: {razorpay_error}\n")
             sys.stderr.flush()
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Failed to verify payment with Razorpay: {str(razorpay_error)}"
-            )
+            raise DatabaseError(f"Failed to verify payment with Razorpay: {str(razorpay_error)}")
         
         # Update booking with payment information
         update_data = {
@@ -374,10 +372,7 @@ async def verify_payment(
         booking_update_response = supabase_admin.table("bookings").update(update_data).eq("id", booking["id"]).execute()
         
         if not booking_update_response.data:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to update booking"
-            )
+            raise DatabaseError("Failed to update booking")
         
         updated_booking = booking_update_response.data[0]
         
@@ -466,17 +461,14 @@ async def verify_payment(
             chat_session_id=chat_session_id
         )
     
-    except HTTPException:
+    except (HTTPException, NotFoundError, AuthorizationError, DatabaseError, ValidationError):
         raise
     except Exception as e:
         import traceback
         sys.stderr.write(f"[ERROR] Error verifying payment: {e}\n")
         traceback.print_exc(file=sys.stderr)
         sys.stderr.flush()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to verify payment: {str(e)}"
-        )
+        raise DatabaseError(f"Failed to verify payment: {str(e)}")
 
 
 @router.post("/webhook")
@@ -490,10 +482,7 @@ async def razorpay_webhook(
     """
     razorpay_client = get_razorpay_client()
     if not razorpay_client:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Payment service is not configured"
-        )
+        raise DatabaseError("Payment service is not configured")
     
     try:
         # Verify webhook signature
@@ -501,10 +490,7 @@ async def razorpay_webhook(
         received_signature = x_razorpay_signature
         
         if not received_signature:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Missing Razorpay signature"
-            )
+            raise ValidationError("Missing Razorpay signature")
         
         # Razorpay webhook signature verification
         # Note: This is a simplified version. In production, use Razorpay's webhook verification library
@@ -550,8 +536,5 @@ async def razorpay_webhook(
         sys.stderr.write(f"[ERROR] Error processing webhook: {e}\n")
         traceback.print_exc(file=sys.stderr)
         sys.stderr.flush()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Webhook processing failed: {str(e)}"
-        )
+        raise DatabaseError(f"Webhook processing failed: {str(e)}")
 

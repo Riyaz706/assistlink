@@ -1,11 +1,24 @@
 from fastapi import FastAPI, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from app.routers import auth, users, caregivers, bookings, location, dashboard, chat, notifications, payments, google_auth, test, emergency
 from app.config import settings
 from src.config.db import get_db_connection, return_db_connection
+from app.error_handler import (
+    AppError,
+    app_error_handler,
+    http_exception_handler,
+    validation_exception_handler,
+    validation_exception_handler,
+    generic_exception_handler
+)
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from app.limiter import limiter
 import time
 import traceback
+import uuid
 
 app = FastAPI(
     title="AssistLink Backend API",
@@ -13,75 +26,64 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Add request logging middleware - MUST be before CORS middleware
+# Add request logging middleware with request ID tracking - MUST be before CORS middleware
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     import sys
+    
+    # Generate unique request ID for tracking
+    request_id = str(uuid.uuid4())
+    request.state.request_id = request_id
+    
     start_time = time.time()
     path_str = str(request.url.path)
     url_str = str(request.url)
     
-    # Log ALL requests to see if middleware is working
-    sys.stderr.write(f"[MIDDLEWARE] Request: {request.method} {path_str}\n")
+    # Log ALL requests with request ID
+    sys.stderr.write(f"[{request_id}] {request.method} {path_str}\n")
     sys.stderr.flush()
     
-    # Log all requests to payment endpoints
+    # Log all requests to payment endpoints with more detail
     if "/api/payments" in path_str or "/api/payments" in url_str:
-        sys.stderr.write(f"[MIDDLEWARE] ===== PAYMENT REQUEST DETECTED =====\n")
-        sys.stderr.write(f"[MIDDLEWARE] Method: {request.method}\n")
-        sys.stderr.write(f"[MIDDLEWARE] Full URL: {url_str}\n")
-        sys.stderr.write(f"[MIDDLEWARE] Path: {path_str}\n")
+        sys.stderr.write(f"[{request_id}] ===== PAYMENT REQUEST =====\n")
+        sys.stderr.write(f"[{request_id}] Method: {request.method}\n")
+        sys.stderr.write(f"[{request_id}] Full URL: {url_str}\n")
         auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
-        sys.stderr.write(f"[MIDDLEWARE] Authorization header: {'Present' if auth_header else 'Missing'}\n")
-        if auth_header:
-            token_preview = auth_header[:30] + "..." if len(auth_header) > 30 else auth_header
-            sys.stderr.write(f"[MIDDLEWARE] Auth token preview: {token_preview}\n")
+        sys.stderr.write(f"[{request_id}] Auth: {'Present' if auth_header else 'Missing'}\n")
         sys.stderr.flush()
     
     try:
         response = await call_next(request)
         process_time = time.time() - start_time
+        
+        # Add request ID to response headers for client-side debugging
+        response.headers["X-Request-ID"] = request_id
+        
         if "/api/payments" in path_str or "/api/payments" in url_str:
-            sys.stderr.write(f"[MIDDLEWARE] Payment response: {response.status_code} in {process_time:.3f}s\n")
+            sys.stderr.write(f"[{request_id}] Payment response: {response.status_code} in {process_time:.3f}s\n")
             sys.stderr.flush()
         return response
     except HTTPException as http_exc:
-        # Re-raise HTTPExceptions as-is (they should be handled by FastAPI)
         process_time = time.time() - start_time
-        if "/api/payments" in path_str or "/api/payments" in url_str:
-            sys.stderr.write(f"[MIDDLEWARE] Payment request HTTPException: {http_exc.status_code} - {http_exc.detail} after {process_time:.3f}s\n")
-            sys.stderr.flush()
+        sys.stderr.write(f"[{request_id}] HTTPException: {http_exc.status_code} - {http_exc.detail} after {process_time:.3f}s\n")
+        sys.stderr.flush()
         raise
     except Exception as e:
         process_time = time.time() - start_time
-        if "/api/payments" in path_str or "/api/payments" in url_str:
-            sys.stderr.write(f"[MIDDLEWARE] Payment request ERROR: {type(e).__name__}: {str(e)} after {process_time:.3f}s\n")
-            traceback.print_exc(file=sys.stderr)
-            sys.stderr.flush()
-        raise
-
-# Global exception handler
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    import sys
-    if "/api/payments" in str(request.url):
-        sys.stderr.write(f"[EXCEPTION HANDLER] Payment endpoint exception: {type(exc).__name__}: {str(exc)}\n")
+        sys.stderr.write(f"[{request_id}] ERROR: {type(e).__name__}: {str(e)} after {process_time:.3f}s\n")
         traceback.print_exc(file=sys.stderr)
         sys.stderr.flush()
-    
-    if isinstance(exc, HTTPException):
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={"detail": exc.detail}
-        )
-    
-    sys.stderr.write(f"[EXCEPTION HANDLER] Unhandled exception: {type(exc).__name__}: {str(exc)}\n")
-    traceback.print_exc(file=sys.stderr)
-    sys.stderr.flush()
-    return JSONResponse(
-        status_code=500,
-        content={"detail": f"Internal server error: {str(exc)}"}
-    )
+        raise
+
+# Register custom error handlers
+app.add_exception_handler(AppError, app_error_handler)
+app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(Exception, generic_exception_handler)
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Initialize limiter
+app.state.limiter = limiter
 
 # CORS middleware
 # Handle CORS_ORIGINS as string ("*" or comma-separated)

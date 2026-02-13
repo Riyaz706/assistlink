@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar, KeyboardAvoidingView, Platform, ScrollView, Dimensions, Image } from 'react-native';
 import { useAuth } from './context/AuthContext';
+import { useErrorHandler, isNetworkError, isAuthError } from './hooks/useErrorHandler';
 
 // If you are using Expo:
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
@@ -17,6 +18,7 @@ const COLORS = {
   inputBorder: '#E8E8E8',
   inputBackground: '#FFFFFF',
   placeholder: '#A0A0A0',
+  errorRed: '#DC2626',
 };
 
 const { width } = Dimensions.get('window');
@@ -26,21 +28,42 @@ const LoginScreen = ({ navigation }: any) => {
   const [password, setPassword] = useState('');
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const { login } = useAuth();
+  const { error, handleError, clearError } = useErrorHandler();
 
   const handleLogin = async () => {
+    // Clear previous errors
+    clearError();
+
+    // Client-side validation
     if (!email || !password) {
-      setError('Please enter email and password');
+      handleError(new Error('Please enter email and password'), 'login-validation');
       return;
     }
-    setError(null);
+
+    // Basic email format validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      handleError(new Error('Please enter a valid email address'), 'login-validation');
+      return;
+    }
+
     setLoading(true);
     try {
       await login(email.trim(), password);
       // Navigation handled by RootNavigator based on role
     } catch (e: any) {
-      setError(e?.message || 'Failed to login. Please check your credentials.');
+      const errorDetails = handleError(e, 'login');
+
+      // Provide specific feedback based on error type
+      if (isNetworkError(e)) {
+        // Network error already has good message from handleError
+      } else if (isAuthError(e)) {
+        // Auth error already has good message from backend
+      } else {
+        // Fallback for other errors
+        console.error('Login error:', e);
+      }
     } finally {
       setLoading(false);
     }
@@ -130,7 +153,7 @@ const LoginScreen = ({ navigation }: any) => {
             {error ? (
               <View style={styles.errorContainer}>
                 <Icon name="alert-circle-outline" size={20} color="#DC2626" />
-                <Text style={styles.errorText}>{error}</Text>
+                <Text style={styles.errorText}>{error.message}</Text>
               </View>
             ) : null}
 

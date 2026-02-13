@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { api } from './api/client';
 import { useAuth } from './context/AuthContext';
+import { useErrorHandler } from './hooks/useErrorHandler';
 
 const THEME = {
   bg: "#F5F7F5",
@@ -23,7 +24,9 @@ const THEME = {
   text: "#1A1A1A",
   subText: "#666666",
   searchBg: "#E0E0E0",
-  iconPlaceholder: "#E0E0E0"
+  iconPlaceholder: "#E0E0E0",
+  error: "#EF4444",
+  errorBg: "#FEF2F2"
 };
 
 export default function ChatList2({ navigation }: any) {
@@ -33,17 +36,20 @@ export default function ChatList2({ navigation }: any) {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
+  const { handleError, error, clearError } = useErrorHandler();
+
   const loadChatSessions = async () => {
     try {
+      clearError();
       setLoading(true);
       const sessions = await api.getChatSessions();
       console.log("Chat sessions received:", JSON.stringify(sessions, null, 2));
       // Filter to only show enabled chat sessions
-      const enabledSessions = (sessions || []).filter((s: any) => s.is_enabled === true);
+      const enabledSessions = ((sessions as any[]) || []).filter((s: any) => s.is_enabled === true);
       console.log("Enabled sessions:", enabledSessions.length);
       setChatSessions(enabledSessions);
     } catch (e: any) {
-      console.error("Failed to load chat sessions:", e);
+      handleError(e, 'load-chats');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -155,11 +161,11 @@ export default function ChatList2({ navigation }: any) {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="dark-content" backgroundColor={THEME.bg} />
-      
+
       <View style={styles.header}>
-        <View style={{flexDirection: 'row', alignItems: 'center'}}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={{marginRight: 10}}>
-             <Ionicons name="arrow-back" size={28} color={THEME.text} />
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginRight: 10 }}>
+            <Ionicons name="arrow-back" size={28} color={THEME.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>My Messages</Text>
         </View>
@@ -168,10 +174,21 @@ export default function ChatList2({ navigation }: any) {
         </TouchableOpacity>
       </View>
 
+      {/* ERROR BANNER */}
+      {error && (
+        <View style={styles.errorBanner}>
+          <Icon name="alert-circle" size={20} color={THEME.error} />
+          <Text style={styles.errorText}>{error.message}</Text>
+          <TouchableOpacity onPress={clearError}>
+            <Icon name="close" size={20} color={THEME.error} />
+          </TouchableOpacity>
+        </View>
+      )}
+
       <View style={styles.searchContainer}>
         <Icon name="magnify" size={20} color={THEME.subText} style={{ marginRight: 10 }} />
-        <TextInput 
-          placeholder="Search conversations..." 
+        <TextInput
+          placeholder="Search conversations..."
           placeholderTextColor={THEME.subText}
           style={styles.searchInput}
           value={searchQuery}
@@ -233,4 +250,22 @@ const styles = StyleSheet.create({
   roleText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
   messageRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   message: { color: THEME.subText, fontSize: 14, flex: 1, marginRight: 10 },
+  errorBanner: {
+    backgroundColor: THEME.errorBg,
+    marginHorizontal: 20,
+    marginBottom: 15,
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FAC8C8',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  errorText: {
+    color: THEME.error,
+    flex: 1,
+    marginLeft: 8,
+    fontSize: 14,
+  },
 });
