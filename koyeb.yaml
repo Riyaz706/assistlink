@@ -1,0 +1,41 @@
+version: "1.0"
+apps:
+  - name: assistlink
+    services:
+      - name: backend
+        type: web
+        instance_type: nano
+        regions:
+          - fra
+        root_dir: AssistLink-Backend
+        docker_command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+        env:
+          - key: ENVIRONMENT
+            value: production
+          - key: SUPABASE_URL
+            type: secret
+          - key: SUPABASE_ANON_KEY
+            type: secret
+          - key: SUPABASE_SERVICE_ROLE_KEY
+            type: secret
+          - key: DATABASE_URL
+            type: secret
+          - key: SUPABASE_DB_PASSWORD
+            type: secret
+          - key: SECRET_KEY
+            type: secret
+          - key: TWILIO_ACCOUNT_SID
+            type: secret
+          - key: TWILIO_AUTH_TOKEN
+            type: secret
+          - key: RAZORPAY_KEY_ID
+            type: secret
+          - key: RAZORPAY_KEY_SECRET
+            type: secret
+        ports:
+          - port: 8000
+            protocol: http
+        health_checks:
+          - http:
+              path: /health
+              port: 8000
