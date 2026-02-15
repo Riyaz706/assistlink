@@ -6,9 +6,8 @@ import React, {
   ReactNode,
 } from "react";
 import * as SecureStore from "expo-secure-store";
-import { api, setAccessToken } from "../api/client";
+import { api, setAccessToken, setRefreshToken } from "../api/client";
 import { Platform } from "react-native";
-import * as Sentry from "@sentry/react-native";
 
 type User = any;
 
@@ -17,6 +16,7 @@ type AuthContextType = {
   accessToken: string | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  googleLogin: (idToken: string, role?: "care_recipient" | "caregiver") => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
@@ -111,20 +111,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             if (isMounted) {
               console.log("AuthContext: User profile restored:", (me as any)?.email || (me as any)?.full_name || "Unknown");
               setUser(me as any);
-
-              // Tag user in Sentry
-              Sentry.setUser({
-                id: (me as any).id,
-                email: (me as any).email,
-                username: (me as any).full_name,
-              });
             }
           } catch (meError: any) {
             // If token is invalid (401), clear it
             const errorMsg = meError?.message || '';
             console.error("AuthContext: Failed to fetch user profile:", errorMsg);
             if (isMounted) {
-              if (errorMsg.includes('401') || errorMsg.includes('Not authenticated') || errorMsg.includes('Unauthorized')) {
+              if (meError.statusCode === 401 || errorMsg.includes('401') || errorMsg.includes('Not authenticated') || errorMsg.includes('Unauthorized')) {
                 console.log("AuthContext: Token expired or invalid - clearing...");
                 await clearToken();
                 setAccessTokenState(null);
@@ -167,36 +160,85 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       const res = await api.login({ email, password });
       const token = res.access_token;
+      const refreshToken = res.refresh_token;
       console.log("AuthContext: Login successful, token received");
 
-      await setToken(token);
+      await setToken(token); // Update AuthContext's local persistence (legacy but kept for safety)
+      // Update client.ts persistence
+      if (Platform.OS === 'web') {
+        window.localStorage.setItem('assistlink_token', token);
+      } else {
+        await SecureStore.setItemAsync('assistlink_token', token);
+      }
+
       setAccessTokenState(token);
       setAccessToken(token);
+
+      if (refreshToken) {
+        await setRefreshToken(refreshToken);
+      }
 
       try {
         const me = await api.me();
         console.log("AuthContext: User profile fetched:", (me as any)?.email || (me as any)?.full_name || "Unknown");
         setUser(me as any);
-
-        // Tag user in Sentry
-        Sentry.setUser({
-          id: (me as any).id || res.user?.id,
-          email: (me as any).email || email,
-          username: (me as any).full_name,
-        });
       } catch (meError: any) {
         console.error("AuthContext: Failed to fetch user profile after login:", meError);
-        // Even if fetching profile fails, we have the token, so set a minimal user object
-        // The user can still use the app, and we'll retry on next load
         setUser({ email, id: res.user?.id || null });
         throw new Error("Login successful but failed to load profile. Please try again.");
       }
     } catch (error: any) {
       console.error("AuthContext: Login error:", error);
-      // Clear any partial state
       await clearToken();
       setAccessTokenState(null);
       setAccessToken(null);
+      await setRefreshToken(null);
+      setUser(null);
+      throw error;
+    }
+  };
+
+  const googleLogin = async (idToken: string, role: "care_recipient" | "caregiver" = "care_recipient") => {
+    console.log("AuthContext: Starting Google login...");
+    try {
+      // Role defaults to care_recipient for now, can be adjusted or passed in
+      const res = await api.googleAuth({
+        id_token: idToken,
+        role: role
+      });
+
+      const token = res.access_token;
+      const refreshToken = res.refresh_token;
+      console.log("AuthContext: Google Login successful");
+
+      await setToken(token);
+      // Update client.ts persistence
+      if (Platform.OS === 'web') {
+        window.localStorage.setItem('assistlink_token', token);
+      } else {
+        await SecureStore.setItemAsync('assistlink_token', token);
+      }
+
+      setAccessTokenState(token);
+      setAccessToken(token);
+
+      if (refreshToken) {
+        await setRefreshToken(refreshToken);
+      }
+
+      try {
+        const me = await api.me();
+        setUser(me as any);
+      } catch (meError) {
+        console.error("AuthContext: Failed to fetch profile after Google login", meError);
+        setUser(res.user);
+      }
+    } catch (error: any) {
+      console.error("AuthContext: Google Login error:", error);
+      await clearToken();
+      setAccessTokenState(null);
+      setAccessToken(null);
+      await setRefreshToken(null);
       setUser(null);
       throw error;
     }
@@ -205,13 +247,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const refreshUser = async () => {
     try {
       const token = await getToken();
-      if (token) {
-        setAccessTokenState(token);
-        setAccessToken(token);
-        const me = await api.me();
-        setUser(me as any);
+      if (!token) return;
+      setAccessTokenState(token);
+      setAccessToken(token);
+      const me = await api.me();
+      setUser(me as any);
+    } catch (error: any) {
+      if (error?.statusCode === 401) {
+        await clearToken();
+        setAccessTokenState(null);
+        setAccessToken(null);
+        setUser(null);
       }
-    } catch (error) {
       console.error("AuthContext: Error refreshing user:", error);
     }
   };
@@ -226,13 +273,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setAccessToken(null);
       setUser(null);
 
-      // Clear user in Sentry
-      Sentry.setUser(null);
-
       // Then clear token in background (non-blocking)
-      clearToken().catch((error) => {
+      // Then clear token in background (non-blocking)
+      try {
+        await clearToken();
+        await setRefreshToken(null);
+      } catch (error) {
         console.warn("AuthContext: Error clearing token (non-critical):", error);
-      });
+      }
 
       console.log("AuthContext: Logout complete - state cleared");
     } catch (error) {
@@ -241,9 +289,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setAccessTokenState(null);
       setAccessToken(null);
       setUser(null);
-
-      // Clear user in Sentry
-      Sentry.setUser(null);
+      setRefreshToken(null);
     }
   };
 
@@ -279,6 +325,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         accessToken: accessTokenState,
         loading,
         login,
+        googleLogin,
         logout,
         refreshUser,
         resetPassword,
@@ -297,5 +344,3 @@ export const useAuth = () => {
   }
   return ctx;
 };
-
-

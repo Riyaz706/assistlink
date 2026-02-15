@@ -104,7 +104,7 @@ export default function ProfileScreen({ navigation }: any) {
       <View style={styles.header}>
         <View style={{ width: 40 }} />
         <Text style={styles.headerTitle}>Profile</Text>
-        <TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.navigate('HelpSupport')}>
           <Text style={styles.helpText}>Help</Text>
         </TouchableOpacity>
       </View>

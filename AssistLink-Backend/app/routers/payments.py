@@ -132,14 +132,13 @@ async def create_payment_order(
     current_user: dict = Depends(verify_care_recipient)
 ):
     """
-    TEMPORARY: Bypass Razorpay and directly enable chat.
-    This endpoint directly enables chat without going through Razorpay payment.
+    Create a payment order. If RAZORPAY_BYPASS_MODE is True, it directly enables chat.
+    Otherwise, it creates a Razorpay order.
     """
     import sys
-    sys.stderr.write(f"[ENDPOINT] ===== CREATE PAYMENT ORDER (BYPASS MODE) =====\n")
+    sys.stderr.write(f"[ENDPOINT] ===== CREATE PAYMENT ORDER =====\n")
     sys.stderr.write(f"[ENDPOINT] Booking ID: {request.booking_id}\n")
-    sys.stderr.write(f"[ENDPOINT] Amount: {request.amount}, Currency: {request.currency}\n")
-    sys.stderr.write(f"[ENDPOINT] Current user ID: {current_user.get('id') if current_user else 'None'}\n")
+    sys.stderr.write(f"[ENDPOINT] Bypass Mode: {settings.RAZORPAY_BYPASS_MODE}\n")
     sys.stderr.flush()
     
     try:
@@ -157,130 +156,170 @@ async def create_payment_order(
         
         # Check if payment already exists
         if booking.get("payment_status") == "completed":
-            sys.stderr.write(f"[INFO] Payment already completed, returning existing chat session\n")
+            sys.stderr.write(f"[INFO] Payment already completed, returning success\n")
             sys.stderr.flush()
-            chat_session_id = booking.get("chat_session_id")
-            if chat_session_id:
-                return CreatePaymentOrderResponse(
-                    order_id="bypass_" + request.booking_id,
-                    amount=booking.get("amount") or request.amount or 500,
-                    currency=booking.get("currency") or request.currency or "INR",
-                    key_id="bypass",
-                    booking_id=request.booking_id
-                )
-        
+            return CreatePaymentOrderResponse(
+                order_id="completed_" + request.booking_id,
+                amount=booking.get("amount") or request.amount or 500,
+                currency=booking.get("currency") or request.currency or "INR",
+                key_id="completed",
+                booking_id=request.booking_id
+            )
+
         # Use amount from request or booking
         amount = request.amount or booking.get("amount") or 500
         currency = request.currency or booking.get("currency") or "INR"
-        
-        sys.stderr.write(f"[INFO] Bypassing Razorpay - directly enabling chat\n")
-        sys.stderr.flush()
-        
-        # Update booking with payment status = completed (bypass mode)
-        update_response = supabase_admin.table("bookings").update({
-            "amount": amount,
-            "currency": currency,
-            "payment_status": "completed",
-            "status": "accepted",
-            "payment_completed_at": datetime.now(timezone.utc).isoformat(),
-            "accepted_at": datetime.now(timezone.utc).isoformat()
-        }).eq("id", request.booking_id).execute()
-        
-        if not update_response.data:
-            raise DatabaseError("Failed to update booking")
-        
-        updated_booking = update_response.data[0]
-        
-        # Enable chat session
-        chat_session_id = None
-        chat_check = supabase_admin.table("chat_sessions").select("*").eq("care_recipient_id", booking["care_recipient_id"]).eq("caregiver_id", booking["caregiver_id"]).execute()
-        
-        if chat_check.data and len(chat_check.data) > 0:
-            chat_session_id = chat_check.data[0]["id"]
-            supabase_admin.table("chat_sessions").update({
-                "is_enabled": True,
-                "care_recipient_accepted": True,
-                "caregiver_accepted": True,
-                "enabled_at": datetime.now(timezone.utc).isoformat()
-            }).eq("id", chat_session_id).execute()
-        else:
-            new_chat = supabase_admin.table("chat_sessions").insert({
-                "care_recipient_id": booking["care_recipient_id"],
-                "caregiver_id": booking["caregiver_id"],
-                "is_enabled": True,
-                "care_recipient_accepted": True,
-                "caregiver_accepted": True,
-                "enabled_at": datetime.now(timezone.utc).isoformat()
-            }).execute()
-            if new_chat.data:
-                chat_session_id = new_chat.data[0]["id"]
-        
-        # Update booking with chat_session_id
-        if chat_session_id:
-            supabase_admin.table("bookings").update({
-                "chat_session_id": chat_session_id
+
+        if settings.RAZORPAY_BYPASS_MODE:
+            sys.stderr.write(f"[INFO] Bypassing Razorpay - directly enabling chat\n")
+            sys.stderr.flush()
+            
+            # Update booking with payment status = completed (bypass mode)
+            update_response = supabase_admin.table("bookings").update({
+                "amount": amount,
+                "currency": currency,
+                "payment_status": "completed",
+                "status": "accepted",
+                "payment_completed_at": datetime.now(timezone.utc).isoformat(),
+                "accepted_at": datetime.now(timezone.utc).isoformat()
             }).eq("id", request.booking_id).execute()
-        
-        # Mark caregiver as unavailable
-        try:
-            supabase_admin.table("caregiver_profile").update({
-                "availability_status": "unavailable"
-            }).eq("user_id", booking["caregiver_id"]).execute()
-        except Exception as e:
-            sys.stderr.write(f"[WARN] Could not update caregiver availability: {e}\n")
+            
+            if not update_response.data:
+                raise DatabaseError("Failed to update booking")
+            
+            updated_booking = update_response.data[0]
+            
+            # Enable chat session
+            chat_session_id = None
+            chat_check = supabase_admin.table("chat_sessions").select("*").eq("care_recipient_id", booking["care_recipient_id"]).eq("caregiver_id", booking["caregiver_id"]).execute()
+            
+            if chat_check.data and len(chat_check.data) > 0:
+                chat_session_id = chat_check.data[0]["id"]
+                supabase_admin.table("chat_sessions").update({
+                    "is_enabled": True,
+                    "care_recipient_accepted": True,
+                    "caregiver_accepted": True,
+                    "enabled_at": datetime.now(timezone.utc).isoformat()
+                }).eq("id", chat_session_id).execute()
+            else:
+                new_chat = supabase_admin.table("chat_sessions").insert({
+                    "care_recipient_id": booking["care_recipient_id"],
+                    "caregiver_id": booking["caregiver_id"],
+                    "is_enabled": True,
+                    "care_recipient_accepted": True,
+                    "caregiver_accepted": True,
+                    "enabled_at": datetime.now(timezone.utc).isoformat()
+                }).execute()
+                if new_chat.data:
+                    chat_session_id = new_chat.data[0]["id"]
+            
+            # Update booking with chat_session_id
+            if chat_session_id:
+                supabase_admin.table("bookings").update({
+                    "chat_session_id": chat_session_id
+                }).eq("id", request.booking_id).execute()
+            
+            # Mark caregiver as unavailable
+            try:
+                supabase_admin.table("caregiver_profile").update({
+                    "availability_status": "unavailable"
+                }).eq("user_id", booking["caregiver_id"]).execute()
+            except Exception as e:
+                sys.stderr.write(f"[WARN] Could not update caregiver availability: {e}\n")
+                sys.stderr.flush()
+            
+            # Send notifications
+            try:
+                from app.services.notifications import notify_chat_enabled
+                care_recipient_response = supabase_admin.table("users").select("full_name").eq("id", booking["care_recipient_id"]).execute()
+                caregiver_response = supabase_admin.table("users").select("full_name").eq("id", booking["caregiver_id"]).execute()
+                
+                care_recipient_name = care_recipient_response.data[0].get("full_name", "Care recipient") if care_recipient_response.data else "Care recipient"
+                caregiver_name = caregiver_response.data[0].get("full_name", "Caregiver") if caregiver_response.data else "Caregiver"
+                
+                # Chat enabled notifications
+                await notify_chat_enabled(
+                    user_id=booking["care_recipient_id"],
+                    other_party_name=caregiver_name,
+                    chat_session_id=chat_session_id
+                )
+                await notify_chat_enabled(
+                    user_id=booking["caregiver_id"],
+                    other_party_name=care_recipient_name,
+                    chat_session_id=chat_session_id
+                )
+                
+                # Payment success notifications
+                await notify_payment_success(
+                    user_id=booking["care_recipient_id"],
+                    amount=amount,
+                    payment_id=request.booking_id,
+                    other_party_name=caregiver_name,
+                    is_sender=True
+                )
+                await notify_payment_received(
+                    caregiver_id=booking["caregiver_id"],
+                    amount=amount,
+                    care_recipient_name=care_recipient_name,
+                    payment_id=request.booking_id
+                )
+                sys.stderr.write(f"[INFO] Payment notifications sent to both parties\n")
+                sys.stderr.flush()
+            except Exception as notif_error:
+                sys.stderr.write(f"[WARN] Error sending notifications: {notif_error}\n")
+                sys.stderr.flush()
+            
+            sys.stderr.write(f"[INFO] Chat enabled successfully. Chat Session ID: {chat_session_id}\n")
             sys.stderr.flush()
-        
-        # Send notifications
-        try:
-            from app.services.notifications import notify_chat_enabled
-            care_recipient_response = supabase_admin.table("users").select("full_name").eq("id", booking["care_recipient_id"]).execute()
-            caregiver_response = supabase_admin.table("users").select("full_name").eq("id", booking["caregiver_id"]).execute()
             
-            care_recipient_name = care_recipient_response.data[0].get("full_name", "Care recipient") if care_recipient_response.data else "Care recipient"
-            caregiver_name = caregiver_response.data[0].get("full_name", "Caregiver") if caregiver_response.data else "Caregiver"
-            
-            # Chat enabled notifications
-            await notify_chat_enabled(
-                user_id=booking["care_recipient_id"],
-                other_party_name=caregiver_name,
-                chat_session_id=chat_session_id
-            )
-            await notify_chat_enabled(
-                user_id=booking["caregiver_id"],
-                other_party_name=care_recipient_name,
-                chat_session_id=chat_session_id
-            )
-            
-            # Payment success notifications
-            await notify_payment_success(
-                user_id=booking["care_recipient_id"],
+            return CreatePaymentOrderResponse(
+                order_id="bypass_" + request.booking_id,
                 amount=amount,
-                payment_id=request.booking_id,
-                other_party_name=caregiver_name,
-                is_sender=True
+                currency=currency,
+                key_id="bypass",
+                booking_id=request.booking_id
             )
-            await notify_payment_received(
-                caregiver_id=booking["caregiver_id"],
-                amount=amount,
-                care_recipient_name=care_recipient_name,
-                payment_id=request.booking_id
-            )
-            sys.stderr.write(f"[INFO] Payment notifications sent to both parties\n")
-            sys.stderr.flush()
-        except Exception as notif_error:
-            sys.stderr.write(f"[WARN] Error sending notifications: {notif_error}\n")
-            sys.stderr.flush()
-        
-        sys.stderr.write(f"[INFO] Chat enabled successfully. Chat Session ID: {chat_session_id}\n")
-        sys.stderr.flush()
-        
-        return CreatePaymentOrderResponse(
-            order_id="bypass_" + request.booking_id,
-            amount=amount,
-            currency=currency,
-            key_id="bypass",
-            booking_id=request.booking_id
-        )
+        else:
+            # REAL RAZORPAY MODE
+            client = get_razorpay_client()
+            if not client:
+                raise DatabaseError("Razorpay client not initialized. Check credentials.")
+            
+            import uuid
+            order_data = {
+                "amount": int(amount * 100), # Razorpay expects amount in paise
+                "currency": currency,
+                "receipt": f"receipt_{request.booking_id}_{uuid.uuid4().hex[:6]}",
+                "notes": {
+                    "booking_id": request.booking_id,
+                    "care_recipient_id": current_user["id"]
+                }
+            }
+            
+            try:
+                order = client.order.create(data=order_data)
+                sys.stderr.write(f"[INFO] Razorpay order created: {order['id']}\n")
+                sys.stderr.flush()
+                
+                # Update booking with razorpay_order_id
+                supabase_admin.table("bookings").update({
+                    "razorpay_order_id": order["id"],
+                    "amount": amount,
+                    "currency": currency,
+                    "payment_status": "pending"
+                }).eq("id", request.booking_id).execute()
+                
+                return CreatePaymentOrderResponse(
+                    order_id=order["id"],
+                    amount=amount,
+                    currency=currency,
+                    key_id=settings.RAZORPAY_KEY_ID,
+                    booking_id=request.booking_id
+                )
+            except Exception as e:
+                sys.stderr.write(f"[ERROR] Razorpay order creation failed: {e}\n")
+                sys.stderr.flush()
+                raise DatabaseError(f"Failed to create Razorpay order: {str(e)}")
         
     except (HTTPException, NotFoundError, AuthorizationError, DatabaseError):
         raise

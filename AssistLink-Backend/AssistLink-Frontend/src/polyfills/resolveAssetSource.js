@@ -5,17 +5,25 @@
 
 (function patchResolveAssetSourceImmediately() {
   'use strict';
-  
+
   // Patch function - patches resolveAssetSource.setCustomSourceTransformer
-  const patchResolveAssetSource = function(resolveAssetSource) {
+  const patchResolveAssetSource = function (resolveAssetSource) {
     if (!resolveAssetSource) return false;
-    
+
     // CRITICAL: Always define setCustomSourceTransformer as a no-op function
     // This prevents "is not a function (it is undefined)" errors
     try {
+      const descriptor = Object.getOwnPropertyDescriptor(resolveAssetSource, 'setCustomSourceTransformer');
+      if (descriptor && descriptor.configurable === false) {
+        // Not configurable, can't use defineProperty. Try direct assignment if writable.
+        if (descriptor.writable !== false) {
+          resolveAssetSource.setCustomSourceTransformer = function () { return undefined; };
+        }
+        return true;
+      }
+
       Object.defineProperty(resolveAssetSource, 'setCustomSourceTransformer', {
-        value: function() {
-          // No-op: This API is deprecated and not needed in Expo
+        value: function () {
           return undefined;
         },
         writable: true,
@@ -23,18 +31,18 @@
         configurable: true,
       });
     } catch (e) {
-      // If defineProperty fails, try direct assignment
+      // Final fallback
       try {
-        resolveAssetSource.setCustomSourceTransformer = function() {
+        resolveAssetSource.setCustomSourceTransformer = function () {
           return undefined;
         };
       } catch (e2) {
-        // Ignore if assignment also fails
+        // Ignore
       }
     }
     return true;
   };
-  
+
   // Hook into Module system BEFORE anything else loads
   try {
     const Module = require('module');
@@ -42,13 +50,13 @@
       // Patch Module._load to intercept ALL module loads
       const originalLoad = Module._load;
       if (originalLoad) {
-        Module._load = function(request, parent, isMain) {
+        Module._load = function (request, parent, isMain) {
           const result = originalLoad.apply(this, arguments);
-          
+
           // Patch resolveAssetSource when it's loaded
           if (result && typeof result === 'object') {
             if (request && (
-              request.includes('resolveAssetSource') || 
+              request.includes('resolveAssetSource') ||
               request.includes('Image/resolveAssetSource') ||
               request.includes('react-native/Libraries/Image') ||
               request.includes('react-native/src/Libraries/Image') ||
@@ -59,17 +67,17 @@
                 patchResolveAssetSource(result.default);
               }
             }
-            
+
             // Also check if the result exports resolveAssetSource
             if (result.resolveAssetSource) {
               patchResolveAssetSource(result.resolveAssetSource);
             }
           }
-          
+
           return result;
         };
       }
-      
+
       // Also patch require.cache to patch already loaded modules
       if (Module._cache) {
         for (const key in Module._cache) {
@@ -96,7 +104,7 @@
   } catch (e) {
     // Module patching failed - continue with direct patching
   }
-  
+
   // Try to patch immediately with static requires (correct path for React Native 0.81+)
   // The actual file is at Libraries/Image/resolveAssetSource.js (not src/Libraries)
   try {

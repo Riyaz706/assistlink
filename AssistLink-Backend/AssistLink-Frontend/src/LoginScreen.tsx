@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar, KeyboardAvoidingView, Platform, ScrollView, Dimensions, Image } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
 import { useAuth } from './context/AuthContext';
+import { useGoogleAuth } from './hooks/useGoogleAuth';
 import { useErrorHandler, isNetworkError, isAuthError } from './hooks/useErrorHandler';
+
+WebBrowser.maybeCompleteAuthSession();
 
 // If you are using Expo:
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
@@ -9,16 +13,17 @@ import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 // If you are NOT using Expo (Bare React Native), uncomment this:
 // import Icon from 'react-native-vector-icons/MaterialCommunityIcons'; 
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { colors as themeColors } from './theme';
 
 const COLORS = {
-  background: '#F4F9F6',
-  primaryGreen: '#059669',
-  darkText: '#1A1A1A',
-  grayText: '#7A7A7A',
-  inputBorder: '#E8E8E8',
-  inputBackground: '#FFFFFF',
-  placeholder: '#A0A0A0',
-  errorRed: '#DC2626',
+  background: themeColors.background,
+  primaryGreen: themeColors.secondary,
+  darkText: themeColors.textPrimary,
+  grayText: themeColors.textSecondary,
+  inputBorder: themeColors.border,
+  inputBackground: themeColors.card,
+  placeholder: themeColors.textMuted,
+  errorRed: themeColors.error,
 };
 
 const { width } = Dimensions.get('window');
@@ -28,8 +33,26 @@ const LoginScreen = ({ navigation }: any) => {
   const [password, setPassword] = useState('');
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+  const { login, googleLogin } = useAuth();
+  const { signInWithGoogle, loading: googleLoading, isReady: googleReady } = useGoogleAuth();
   const { error, handleError, clearError } = useErrorHandler();
+
+  const handleGoogleSignIn = async () => {
+    setLoading(true);
+    clearError();
+    try {
+      const result = await signInWithGoogle();
+      if (result.idToken) {
+        await googleLogin(result.idToken);
+      } else {
+        throw new Error('No ID Token received');
+      }
+    } catch (e: any) {
+      handleError(e, 'google-login');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleLogin = async () => {
     // Clear previous errors
@@ -81,7 +104,7 @@ const LoginScreen = ({ navigation }: any) => {
 
           {/* Header Back Button */}
           <View style={styles.header}>
-            <TouchableOpacity onPress={() => console.log('Go Back')}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={{ padding: 8 }}>
               <Icon name="arrow-left" size={26} color={COLORS.darkText} />
             </TouchableOpacity>
           </View>
@@ -159,9 +182,10 @@ const LoginScreen = ({ navigation }: any) => {
 
             <TouchableOpacity
               style={styles.loginButton}
-              activeOpacity={0.8}
+              activeOpacity={0.7}
               onPress={handleLogin}
               disabled={loading}
+              delayPressIn={0}
             >
               <Text style={styles.loginButtonText}>
                 {loading ? 'Logging in...' : 'Log In'}
@@ -180,7 +204,11 @@ const LoginScreen = ({ navigation }: any) => {
           <View style={styles.socialRow}>
             {/* Apple button removed */}
 
-            <TouchableOpacity style={styles.socialButton}>
+            <TouchableOpacity
+              style={[styles.socialButton, { opacity: (!googleReady || loading || googleLoading) ? 0.5 : 1 }]}
+              onPress={handleGoogleSignIn}
+              disabled={!googleReady || loading || googleLoading}
+            >
               {/* Using a generic URL for the Google Logo */}
               <Image
                 source={{ uri: 'https://cdn-icons-png.flaticon.com/512/2991/2991148.png' }}

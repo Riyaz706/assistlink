@@ -25,6 +25,7 @@ import BottomNav from './BottomNav';
 import { useAuth } from './context/AuthContext';
 import { api } from './api/client';
 import { useErrorHandler } from './hooks/useErrorHandler';
+import { colors } from './theme';
 
 // --- TYPES ---
 import { useNavigation, NavigationProp } from '@react-navigation/native';
@@ -111,7 +112,7 @@ const SosSwipeButton = ({ onSwipeSuccess }: { onSwipeSuccess: () => void }) => {
 const CareRecipientDashboard = () => {
   // Use the typed navigation hook
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, logout } = useAuth();
   const { handleError } = useErrorHandler();
 
   // --- STATE ---
@@ -123,6 +124,7 @@ const CareRecipientDashboard = () => {
   const [caretakerPhone, setCaretakerPhone] = useState("");
   const [currentBookings, setCurrentBookings] = useState<any[]>([]);
   const [loadingBookings, setLoadingBookings] = useState(false);
+  const [menuVisible, setMenuVisible] = useState(false);
   const scaleValue = useRef(new Animated.Value(0)).current;
 
   const loadCurrentBookings = async () => {
@@ -224,13 +226,9 @@ const CareRecipientDashboard = () => {
   );
 
   const handleMarkCompleted = async (bookingId: string) => {
-    console.log("Mark as Completed pressed for booking:", bookingId);
     try {
       await api.completeBooking(bookingId);
-      console.log("Complete booking API call succeeded for booking:", bookingId);
-      await loadCurrentBookings(); // Reload bookings after completion
-      Alert.alert("Success", "Booking marked as completed! The caregiver is now available for other requests.");
-      await loadCurrentBookings(); // Reload bookings after completion
+      await loadCurrentBookings();
       Alert.alert("Success", "Booking marked as completed! The caregiver is now available for other requests.");
     } catch (e: any) {
       handleError(e, 'mark-completed');
@@ -247,6 +245,17 @@ const CareRecipientDashboard = () => {
 
   const handleCloseModal = () => {
     setShowSosModal(false);
+  };
+
+  const handleMenuAction = (action: string) => {
+    setMenuVisible(false);
+    if (action === 'Emergency') navigation.navigate('EmergencyScreen');
+    else if (action === 'Settings') navigation.navigate('Settings');
+    else if (action === 'HelpSupport') navigation.navigate('HelpSupport');
+    else if (action === 'Feedback') navigation.navigate('HelpSupport');
+    else if (action === 'Logout') {
+      logout().catch((e: any) => handleError(e, 'logout'));
+    }
   };
 
   const handleSaveContact = async () => {
@@ -357,29 +366,79 @@ const CareRecipientDashboard = () => {
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
 
-        {/* HEADER */}
+        {/* HEADER - Hamburger (PRD) + Date/Title + Notifications */}
         <View style={styles.headerRow}>
-          <View>
+          <TouchableOpacity
+            onPress={() => setMenuVisible(true)}
+            style={styles.menuButton}
+            delayPressIn={0}
+            activeOpacity={0.6}
+            accessibilityLabel="Open menu"
+            accessibilityRole="button"
+          >
+            <Icon name="menu" size={26} color={colors.textPrimary} />
+          </TouchableOpacity>
+          <View style={styles.headerCenter}>
             <Text style={styles.date}>{currentDate}</Text>
             <Text style={styles.heading}>
               {greeting}, {firstName}
             </Text>
           </View>
-
           <TouchableOpacity
             style={styles.bell}
             onPress={() => navigation.navigate('Notifications')}
+            delayPressIn={0}
+            activeOpacity={0.6}
           >
-            <Icon name="bell-outline" size={24} color="#000" />
+            <Icon name="bell-outline" size={24} color={colors.textPrimary} />
             <View style={styles.notificationDot} />
           </TouchableOpacity>
         </View>
 
+        {/* Hamburger Menu Modal - PRD: Emergency, NSS Portal, Settings, Help, Feedback, Logout */}
+        <Modal visible={menuVisible} transparent animationType="fade">
+          <Pressable style={styles.menuOverlay} onPress={() => setMenuVisible(false)}>
+            <View style={styles.menuPanel}>
+              <View style={styles.menuHeader}>
+                <Text style={styles.menuTitle}>Menu</Text>
+                <TouchableOpacity onPress={() => setMenuVisible(false)} delayPressIn={0} activeOpacity={0.6}>
+                  <Icon name="close" size={24} color={colors.textPrimary} />
+                </TouchableOpacity>
+              </View>
+              <TouchableOpacity style={styles.menuItem} onPress={() => handleMenuAction('Emergency')} delayPressIn={0} activeOpacity={0.6}>
+                <Icon name="alert-octagon" size={22} color={colors.error} />
+                <Text style={styles.menuItemText}>Emergency Services</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuVisible(false); }} delayPressIn={0} activeOpacity={0.6}>
+                <Icon name="school" size={22} color={colors.primary} />
+                <Text style={styles.menuItemText}>NSS Portal</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.menuItem} onPress={() => handleMenuAction('Settings')} delayPressIn={0} activeOpacity={0.6}>
+                <Icon name="cog" size={22} color={colors.textPrimary} />
+                <Text style={styles.menuItemText}>Settings</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.menuItem} onPress={() => handleMenuAction('HelpSupport')} delayPressIn={0} activeOpacity={0.6}>
+                <Icon name="help-circle" size={22} color={colors.primary} />
+                <Text style={styles.menuItemText}>Help & Support</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.menuItem} onPress={() => handleMenuAction('Feedback')} delayPressIn={0} activeOpacity={0.6}>
+                <Icon name="message-reply-text" size={22} color={colors.accent} />
+                <Text style={styles.menuItemText}>Feedback</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.menuItem, styles.menuItemLogout]} onPress={() => handleMenuAction('Logout')} delayPressIn={0} activeOpacity={0.6}>
+                <Icon name="logout" size={22} color={colors.error} />
+                <Text style={styles.menuItemTextLogout}>Logout</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Modal>
+
         {/* PROFILE CARD */}
         <TouchableOpacity
           style={styles.profileCard}
-          activeOpacity={0.7}
+          activeOpacity={0.6}
           onPress={() => navigation.navigate('Profile')}
+          delayPressIn={0}
         >
           <View style={styles.profileLeft}>
             <View style={styles.avatarWrapper}>
@@ -411,8 +470,9 @@ const CareRecipientDashboard = () => {
         {/* REQUEST CARE BUTTON */}
         <TouchableOpacity
           style={styles.requestBtn}
-          activeOpacity={0.8}
+          activeOpacity={0.7}
           onPress={handleNewRequest}
+          delayPressIn={0}
         >
           <Icon name="plus" size={22} color="#fff" style={{ marginRight: 8 }} />
           <Text style={styles.requestText}>Request New Care</Text>
@@ -425,7 +485,7 @@ const CareRecipientDashboard = () => {
         {/* STATUS SECTION HEADER */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Current Status</Text>
-          <TouchableOpacity onPress={() => navigation.navigate('RecipientSchedule')}>
+          <TouchableOpacity onPress={() => navigation.navigate('Schedule')}>
             <Text style={styles.link}>View Schedule</Text>
           </TouchableOpacity>
         </View>
@@ -582,6 +642,8 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === 'android' ? 40 : 10,
     marginTop: Platform.OS === 'android' ? 10 : 0,
   },
+  menuButton: { padding: 8, marginRight: 8 },
+  headerCenter: { flex: 1 },
   date: { color: GREEN, fontSize: 12, fontWeight: "600", letterSpacing: 1 },
   heading: { fontSize: 26, fontWeight: "700", color: '#1A1A1A' },
   bell: {
@@ -589,6 +651,14 @@ const styles = StyleSheet.create({
     shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4,
   },
   notificationDot: { position: 'absolute', top: 10, right: 10, width: 8, height: 8, borderRadius: 4, backgroundColor: 'red', borderWidth: 1, borderColor: '#fff' },
+  menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-start', alignItems: 'flex-end', paddingTop: 60, paddingRight: 16 },
+  menuPanel: { backgroundColor: '#fff', borderRadius: 16, minWidth: 260, paddingVertical: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 8 },
+  menuHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  menuTitle: { fontSize: 18, fontWeight: '700', color: '#1F2937' },
+  menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16, gap: 12 },
+  menuItemText: { fontSize: 16, color: '#1F2937', fontWeight: '500' },
+  menuItemLogout: { borderTopWidth: 1, borderTopColor: '#E5E7EB', marginTop: 4 },
+  menuItemTextLogout: { fontSize: 16, color: colors.error, fontWeight: '600' },
 
   // Updated Profile Card to be touchable and consistent
   profileCard: {

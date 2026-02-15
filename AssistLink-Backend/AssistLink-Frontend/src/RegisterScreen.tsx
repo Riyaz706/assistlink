@@ -35,7 +35,7 @@ const RegisterScreen = ({ navigation }: any) => {
 
   const [selectedRole, setSelectedRole] = useState('provide');
   const [loading, setLoading] = useState(false);
-  const { login, refreshUser } = useAuth();
+  const { login, googleLogin } = useAuth();
   const { signInWithGoogle, loading: googleLoading, isReady: googleReady } = useGoogleAuth();
   const { error, handleError, clearError } = useErrorHandler();
 
@@ -48,34 +48,14 @@ const RegisterScreen = ({ navigation }: any) => {
       // Get Google auth result
       const result = await signInWithGoogle();
 
-      if (!result.idToken || !result.user) {
+      if (!result.idToken) {
         throw new Error('Failed to get Google authentication');
       }
 
       const role = selectedRole === 'find' ? 'care_recipient' : 'caregiver';
 
-      // Send to backend for verification and user creation/login
-      const response = await api.googleAuth({
-        id_token: result.idToken,
-        role,
-        full_name: result.user.name,
-        profile_photo_url: result.user.picture,
-      });
-
-      // Set the access token in the API client and storage
-      const { setAccessToken } = await import('./api/client');
-      setAccessToken(response.access_token);
-
-      // Store token in secure storage
-      if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.setItem('assistlink_token', response.access_token);
-      } else {
-        const SecureStore = await import('expo-secure-store');
-        await SecureStore.setItemAsync('assistlink_token', response.access_token);
-      }
-
-      // Refresh user data (this will trigger navigation)
-      await refreshUser();
+      // Use centralized AuthContext logic
+      await googleLogin(result.idToken, role);
 
     } catch (err: any) {
       console.error('[RegisterScreen] Google sign up error:', err);

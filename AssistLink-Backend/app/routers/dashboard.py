@@ -11,99 +11,130 @@ router = APIRouter()
 
 @router.get("/stats", response_model=DashboardStats)
 async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
-    """Get dashboard statistics for current user"""
+    """Get dashboard statistics for current user using optimized direct SQL"""
+    from src.config.db import execute_query
     try:
         user_id = current_user["id"]
         
-        # Get user role
-        user_response = supabase.table("users").select("role").eq("id", user_id).execute()
-        role = user_response.data[0].get("role") if user_response.data else None
+        # Get user role from current_user directly if available, otherwise fetch
+        role = current_user.get("user_metadata", {}).get("role")
+        if not role:
+            role_res = execute_query("SELECT role FROM users WHERE id = %s", (user_id,))
+            role = role_res[0]["role"] if role_res else None
         
         if not role:
-             print(f"[WARN] User role not found for ID: {user_id}")
+            return DashboardStats(upcoming_bookings=0, active_bookings=0, completed_bookings=0, pending_video_calls=0, active_chat_sessions=0)
+        
+        # Consolidate all stats into one efficient SQL query
+        role_col = "caregiver_id" if role == "caregiver" else "care_recipient_id"
+        
+        query = f"""
+            WITH b_stats AS (
+                SELECT 
+                    COUNT(*) FILTER (WHERE status IN ('pending', 'accepted') AND scheduled_date > NOW()) as upcoming,
+                    COUNT(*) FILTER (WHERE status = 'in_progress') as active,
+                    COUNT(*) FILTER (WHERE status = 'completed') as completed,
+                    COALESCE(SUM(amount) FILTER (WHERE payment_status = 'completed'), 0) as earnings
+                FROM bookings 
+                WHERE {role_col} = %s
+            ),
+            v_stats AS (
+                SELECT COUNT(*) as pending_calls
+                FROM video_call_requests
+                WHERE {role_col} = %s AND status = 'pending'
+            ),
+            c_stats AS (
+                SELECT COUNT(*) as active_chats
+                FROM chat_sessions
+                WHERE {role_col} = %s AND is_enabled = true
+            ),
+            cp_stats AS (
+                SELECT COALESCE(avg_rating, 0.0) as rating
+                FROM caregiver_profile
+                WHERE user_id = %s
+                UNION ALL SELECT 0.0 WHERE NOT EXISTS (SELECT 1 FROM caregiver_profile WHERE user_id = %s)
+                LIMIT 1
+            )
+            SELECT * FROM b_stats, v_stats, c_stats, cp_stats;
+        """
+        
+        res = execute_query(query, (user_id, user_id, user_id, user_id, user_id))
+        if not res:
              return DashboardStats(upcoming_bookings=0, active_bookings=0, completed_bookings=0, pending_video_calls=0, active_chat_sessions=0)
         
-        # Get bookings based on role (with limit for performance)
-        if role == "care_recipient":
-            bookings_query = supabase.table("bookings").select("*").eq("care_recipient_id", user_id).limit(1000)
-        else:
-            bookings_query = supabase.table("bookings").select("*").eq("caregiver_id", user_id).limit(1000)
-        
-        all_bookings = bookings_query.execute().data or []
-        
-        # Count bookings by status
-        now = datetime.now(timezone.utc)
-        upcoming_bookings = len([
-            b for b in all_bookings 
-            if b.get("status") in ["pending", "accepted"] 
-            and b.get("scheduled_date")
-            and datetime.fromisoformat(b["scheduled_date"].replace("Z", "+00:00")) > now
-        ])
-        active_bookings = len([b for b in all_bookings if b.get("status") == "in_progress"])
-        completed_bookings = len([b for b in all_bookings if b.get("status") == "completed"])
-        
-        # Get pending video calls
-        if role == "care_recipient":
-            video_calls_query = supabase.table("video_call_requests").select("*").eq("care_recipient_id", user_id).eq("status", "pending")
-        else:
-            video_calls_query = supabase.table("video_call_requests").select("*").eq("caregiver_id", user_id).eq("status", "pending")
-        
-        pending_video_calls = len(video_calls_query.execute().data or [])
-        
-        # Get active chat sessions
-        if role == "care_recipient":
-            chat_query = supabase.table("chat_sessions").select("*").eq("care_recipient_id", user_id).eq("is_enabled", True)
-        else:
-            chat_query = supabase.table("chat_sessions").select("*").eq("caregiver_id", user_id).eq("is_enabled", True)
-        
-        active_chat_sessions = len(chat_query.execute().data or [])
-        
-        # Get caregiver profile stats if user is a caregiver
-        total_earnings = 0.0
-        avg_rating = 0.0
-        hourly_rate = 500.0 # Default fallback
-        
-        if role == "caregiver":
-            try:
-                profile_response = supabase_admin.table("caregiver_profile").select("avg_rating, hourly_rate").eq("user_id", user_id).execute()
-                if profile_response.data:
-                    profile = profile_response.data[0]
-                    avg_rating = profile.get("avg_rating", 0.0) or 0.0
-                    hourly_rate = profile.get("hourly_rate", 500.0) or 500.0
-            except Exception as e:
-                print(f"[WARN] Failed to fetch caregiver profile for stats: {e}")
-        
-        # Calculate earnings from completed payments
-        # We iterate over all_bookings (already fetched above)
-        if role == "caregiver":
-            for b in all_bookings:
-                # Check for completed payment
-                if b.get("payment_status") == "completed":
-                    amount = b.get("amount")
-                    if amount:
-                        total_earnings += float(amount)
-                    else:
-                        # Fallback if amount is missing but payment is completed
-                        duration = b.get("duration_hours", 0)
-                        total_earnings += float(duration) * hourly_rate
-                # Also check for completed bookings without explicit payment_status (legacy/manual)
-                elif b.get("status") == "completed" and not b.get("payment_status"):
-                    # For legacy completed bookings, assume paid? Or just skip?
-                    # Let's be conservative and only count explicit payments or if we want to be generous for display:
-                    # total_earnings += float(b.get("duration_hours", 0)) * hourly_rate
-                    pass
-        
+        row = res[0]
         return DashboardStats(
-            upcoming_bookings=upcoming_bookings,
-            active_bookings=active_bookings,
-            completed_bookings=completed_bookings,
-            pending_video_calls=pending_video_calls,
-            active_chat_sessions=active_chat_sessions,
-            total_earnings=total_earnings,
-            avg_rating=avg_rating
+            upcoming_bookings=row["upcoming"],
+            active_bookings=row["active"],
+            completed_bookings=row["completed"],
+            pending_video_calls=row["pending_calls"],
+            active_chat_sessions=row["active_chats"],
+            total_earnings=float(row["earnings"]),
+            avg_rating=float(row["rating"])
         )
     
+
     except Exception as e:
+        from src.config.db import DatabaseConnectionError
+        if isinstance(e, DatabaseConnectionError):
+            import sys
+            sys.stderr.write("[DASHBOARD] [FALLBACK] Direct SQL failed, using Supabase client fallback for stats...\n")
+            sys.stderr.flush()
+            
+            try:
+                # Fallback implementation using Supabase Admin client
+                user_id = current_user["id"]
+                
+                # Role fallback
+                role = current_user.get("user_metadata", {}).get("role")
+                if not role:
+                    role_res = supabase_admin.table("users").select("role").eq("id", user_id).execute()
+                    role = role_res.data[0]["role"] if role_res.data else None
+                
+                if not role:
+                    return DashboardStats(upcoming_bookings=0, active_bookings=0, completed_bookings=0, pending_video_calls=0, active_chat_sessions=0)
+
+                role_col = "caregiver_id" if role == "caregiver" else "care_recipient_id"
+                
+                # 1. Bookings stats
+                b_res = supabase_admin.table("bookings").select("status, scheduled_date, amount, payment_status").eq(role_col, user_id).execute()
+                b_data = b_res.data or []
+                
+                now = datetime.now(timezone.utc)
+                upcoming = sum(1 for b in b_data if b["status"] in ["pending", "accepted"] and datetime.fromisoformat(b["scheduled_date"].replace('Z', '+00:00')) > now)
+                active = sum(1 for b in b_data if b["status"] == "in_progress")
+                completed = sum(1 for b in b_data if b["status"] == "completed")
+                earnings = sum(float(b["amount"] or 0) for b in b_data if b["payment_status"] == "completed")
+                
+                # 2. Video calls
+                v_res = supabase_admin.table("video_call_requests").select("id", count="exact").eq(role_col, user_id).eq("status", "pending").execute()
+                pending_calls = v_res.count or 0
+                
+                # 3. Chat sessions
+                c_res = supabase_admin.table("chat_sessions").select("id", count="exact").eq(role_col, user_id).eq("is_enabled", True).execute()
+                active_chats = c_res.count or 0
+                
+                # 4. Rating
+                rating = 0.0
+                if role == "caregiver":
+                    cp_res = supabase_admin.table("caregiver_profile").select("avg_rating").eq("user_id", user_id).execute()
+                    rating = float(cp_res.data[0]["avg_rating"] or 0.0) if cp_res.data else 0.0
+                
+                return DashboardStats(
+                    upcoming_bookings=upcoming,
+                    active_bookings=active,
+                    completed_bookings=completed,
+                    pending_video_calls=pending_calls,
+                    active_chat_sessions=active_chats,
+                    total_earnings=earnings,
+                    avg_rating=rating
+                )
+            except Exception as fallback_err:
+                sys.stderr.write(f"[DASHBOARD] [CRITICAL] Fallback failed: {str(fallback_err)}\n")
+                raise DatabaseError(f"Database connection failed and fallback was unsuccessful: {str(e)}")
+        
+        import sys
+        sys.stderr.write(f"[ERROR] Dashboard stats failed: {str(e)}\n")
         raise DatabaseError(str(e))
 
 
@@ -116,52 +147,98 @@ async def get_dashboard_bookings(
     offset: int = Query(0, ge=0),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get bookings for dashboard"""
+    """Get bookings for dashboard using optimized direct SQL"""
+    from src.config.db import execute_query
     try:
         user_id = current_user["id"]
         
-        # Get user role
-        user_response = supabase_admin.table("users").select("role").eq("id", user_id).execute()
-        role = user_response.data[0].get("role") if user_response.data else None
+        # Get role from current_user directly if available
+        role = current_user.get("user_metadata", {}).get("role")
+        if not role:
+             role_res = execute_query("SELECT role FROM users WHERE id = %s", (user_id,))
+             role = role_res[0]["role"] if role_res else None
         
         if not role:
-            print(f"[WARN] User role not found for ID: {user_id}")
             return []
         
-        # Build query
-        if role == "care_recipient":
-            query = supabase_admin.table("bookings").select("*, caregiver:caregiver_id(*), video_call_request:video_call_request_id(*), chat_session:chat_session_id(*)").eq("care_recipient_id", user_id)
-        else:
-            query = supabase_admin.table("bookings").select("*, care_recipient:care_recipient_id(*), video_call_request:video_call_request_id(*), chat_session:chat_session_id(*)").eq("caregiver_id", user_id)
+        role_col = "caregiver_id" if role == "caregiver" else "care_recipient_id"
+        other_role_col = "care_recipient_id" if role == "caregiver" else "caregiver_id"
+        other_role_alias = "care_recipient" if role == "caregiver" else "caregiver"
+        
+        # Build optimized SQL query
+        where_clauses = [f"b.{role_col} = %s"]
+        params = [user_id]
         
         if status_filter:
-            # Allow multiple statuses separated by comma
             statuses = status_filter.split(',')
-            if len(statuses) > 1:
-                query = query.in_("status", statuses)
-            else:
-                query = query.eq("status", status_filter)
+            where_clauses.append(f"b.status = ANY(%s)")
+            params.append(statuses)
         
         if is_recurring is not None:
-            query = query.eq("is_recurring", is_recurring)
-
+            where_clauses.append("b.is_recurring = %s")
+            params.append(is_recurring)
+            
         if upcoming_only:
-             now = datetime.now(timezone.utc)
-             query = query.gte("scheduled_date", now.isoformat())
+            where_clauses.append("b.scheduled_date >= NOW()")
+            
+        where_str = " AND ".join(where_clauses)
         
-        query = query.order("scheduled_date", desc=False).range(offset, offset + limit - 1)
+        query = f"""
+            SELECT 
+                b.*,
+                (SELECT row_to_json(u) FROM (SELECT * FROM users WHERE id = b.{other_role_col}) u) as {other_role_alias},
+                (SELECT row_to_json(v) FROM (SELECT * FROM video_call_requests WHERE id = b.video_call_request_id) v) as video_call_request,
+                (SELECT row_to_json(c) FROM (SELECT * FROM chat_sessions WHERE id = b.chat_session_id) c) as chat_session
+            FROM bookings b
+            WHERE {where_str}
+            ORDER BY b.scheduled_date ASC
+            LIMIT %s OFFSET %s
+        """
+        params.extend([limit, offset])
         
-        response = query.execute()
-        
-        bookings = response.data or []
-        print(f"[INFO] Dashboard bookings query - User ID: {user_id}, Role: {role}", flush=True)
-        print(f"[INFO] Total bookings returned: {len(bookings)}", flush=True)
-        for idx, booking in enumerate(bookings):
-            print(f"[INFO] Booking {idx + 1}: ID={booking.get('id')}, Status={booking.get('status')}, Service Type={booking.get('service_type')}, Video Call ID={booking.get('video_call_request_id')}", flush=True)
-        
-        return bookings
+        bookings = execute_query(query, tuple(params))
+        return bookings or []
     
+
     except Exception as e:
+        from src.config.db import DatabaseConnectionError
+        if isinstance(e, DatabaseConnectionError):
+            import sys
+            sys.stderr.write("[DASHBOARD] [FALLBACK] Direct SQL failed, using Supabase client fallback for bookings...\n")
+            sys.stderr.flush()
+            
+            try:
+                user_id = current_user["id"]
+                role = current_user.get("user_metadata", {}).get("role")
+                if not role:
+                    role_res = supabase_admin.table("users").select("role").eq("id", user_id).execute()
+                    role = role_res.data[0]["role"] if role_res.data else None
+                
+                if not role: return []
+
+                role_col = "caregiver_id" if role == "caregiver" else "care_recipient_id"
+                other_role_col = "care_recipient_id" if role == "caregiver" else "caregiver_id"
+                other_role_alias = "care_recipient" if role == "caregiver" else "caregiver"
+                
+                query = supabase_admin.table("bookings").select(f"*, {other_role_alias}:{other_role_col}(*), video_call_request:video_call_request_id(*), chat_session:chat_session_id(*)").eq(role_col, user_id)
+                
+                if status_filter:
+                    query = query.in_("status", status_filter.split(','))
+                
+                if is_recurring is not None:
+                    query = query.eq("is_recurring", is_recurring)
+                    
+                if upcoming_only:
+                    query = query.gte("scheduled_date", datetime.now(timezone.utc).isoformat())
+                
+                res = query.order("scheduled_date", desc=False).range(offset, offset + limit - 1).execute()
+                return res.data or []
+            except Exception as fallback_err:
+                sys.stderr.write(f"[DASHBOARD] [CRITICAL] Fallback failed: {str(fallback_err)}\n")
+                raise HTTPException(status_code=500, detail=f"Database connection failed: {str(e)}")
+
+        import sys
+        sys.stderr.write(f"[ERROR] get_dashboard_bookings failed: {str(e)}\n")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
@@ -209,30 +286,66 @@ async def get_upcoming_bookings(
 async def get_recurring_bookings(
     current_user: dict = Depends(get_current_user)
 ):
-    """Get all recurring bookings"""
+    """Get all recurring bookings using optimized direct SQL"""
+    from src.config.db import execute_query
     try:
         user_id = current_user["id"]
         
-        # Get user role
-        user_response = supabase_admin.table("users").select("role").eq("id", user_id).execute()
-        role = user_response.data[0].get("role") if user_response.data else None
+        # Get role from current_user
+        role = current_user.get("user_metadata", {}).get("role")
+        if not role:
+             role_res = execute_query("SELECT role FROM users WHERE id = %s", (user_id,))
+             role = role_res[0]["role"] if role_res else None
         
         if not role:
             return []
         
-        # Build query
-        if role == "care_recipient":
-            query = supabase_admin.table("bookings").select("*, caregiver:caregiver_id(*)").eq("care_recipient_id", user_id).eq("is_recurring", True).limit(500)
-        else:
-            query = supabase_admin.table("bookings").select("*, care_recipient:care_recipient_id(*)").eq("caregiver_id", user_id).eq("is_recurring", True).limit(500)
+        role_col = "caregiver_id" if role == "caregiver" else "care_recipient_id"
+        other_role_col = "care_recipient_id" if role == "caregiver" else "caregiver_id"
+        other_role_alias = "care_recipient" if role == "caregiver" else "caregiver"
         
-        query = query.order("scheduled_date", desc=False)
+        query = f"""
+            SELECT 
+                b.*,
+                (SELECT row_to_json(u) FROM (SELECT * FROM users WHERE id = b.{other_role_col}) u) as {other_role_alias}
+            FROM bookings b
+            WHERE b.{role_col} = %s AND b.is_recurring = true
+            ORDER BY b.scheduled_date ASC
+            LIMIT 500
+        """
         
-        response = query.execute()
-        
-        return response.data or []
+        bookings = execute_query(query, (user_id,))
+        return bookings or []
     
+
     except Exception as e:
+        from src.config.db import DatabaseConnectionError
+        if isinstance(e, DatabaseConnectionError):
+            import sys
+            sys.stderr.write("[DASHBOARD] [FALLBACK] Direct SQL failed, using Supabase client fallback for recurring bookings...\n")
+            sys.stderr.flush()
+            
+            try:
+                user_id = current_user["id"]
+                role = current_user.get("user_metadata", {}).get("role")
+                if not role:
+                    role_res = supabase_admin.table("users").select("role").eq("id", user_id).execute()
+                    role = role_res.data[0]["role"] if role_res.data else None
+                
+                if not role: return []
+
+                role_col = "caregiver_id" if role == "caregiver" else "care_recipient_id"
+                other_role_col = "care_recipient_id" if role == "caregiver" else "caregiver_id"
+                other_role_alias = "care_recipient" if role == "caregiver" else "caregiver"
+                
+                res = supabase_admin.table("bookings").select(f"*, {other_role_alias}:{other_role_col}(*)").eq(role_col, user_id).eq("is_recurring", True).order("scheduled_date", desc=False).limit(500).execute()
+                return res.data or []
+            except Exception as fallback_err:
+                sys.stderr.write(f"[DASHBOARD] [CRITICAL] Fallback failed: {str(fallback_err)}\n")
+                raise HTTPException(status_code=500, detail=f"Database connection failed: {str(e)}")
+
+        import sys
+        sys.stderr.write(f"[ERROR] get_recurring_bookings failed: {str(e)}\n")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
@@ -246,33 +359,81 @@ async def get_dashboard_video_calls(
     offset: int = Query(0, ge=0),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get video call requests for dashboard"""
+    """Get video call requests for dashboard using optimized direct SQL"""
+    from src.config.db import execute_query
     try:
         user_id = current_user["id"]
         
-        # Get user role
-        user_response = supabase_admin.table("users").select("role").eq("id", user_id).execute()
-        role = user_response.data[0].get("role") if user_response.data else None
+        # Get role from current_user
+        role = current_user.get("user_metadata", {}).get("role")
+        if not role:
+             role_res = execute_query("SELECT role FROM users WHERE id = %s", (user_id,))
+             role = role_res[0]["role"] if role_res else None
         
         if not role:
             return []
         
-        # Build query - include other party's info
-        if role == "care_recipient":
-            query = supabase_admin.table("video_call_requests").select("*, caregiver:caregiver_id(*)").eq("care_recipient_id", user_id)
-        else:
-            query = supabase_admin.table("video_call_requests").select("*, care_recipient:care_recipient_id(*)").eq("caregiver_id", user_id)
+        role_col = "caregiver_id" if role == "caregiver" else "care_recipient_id"
+        other_role_col = "care_recipient_id" if role == "caregiver" else "caregiver_id"
+        other_role_alias = "care_recipient" if role == "caregiver" else "caregiver"
+        
+        where_clauses = [f"v.{role_col} = %s"]
+        params = [user_id]
         
         if status_filter:
-            query = query.eq("status", status_filter)
+            where_clauses.append("v.status = %s")
+            params.append(status_filter)
+            
+        where_str = " AND ".join(where_clauses)
         
-        query = query.order("scheduled_time", desc=False).range(offset, offset + limit - 1)
+        query = f"""
+            SELECT 
+                v.*,
+                (SELECT row_to_json(u) FROM (SELECT * FROM users WHERE id = v.{other_role_col}) u) as {other_role_alias}
+            FROM video_call_requests v
+            WHERE {where_str}
+            ORDER BY v.scheduled_time ASC
+            LIMIT %s OFFSET %s
+        """
+        params.extend([limit, offset])
         
-        response = query.execute()
-        
-        return response.data or []
+        video_calls = execute_query(query, tuple(params))
+        return video_calls or []
     
+
     except Exception as e:
+        from src.config.db import DatabaseConnectionError
+        if isinstance(e, DatabaseConnectionError):
+            import sys
+            sys.stderr.write("[DASHBOARD] [FALLBACK] Direct SQL failed, using Supabase client fallback for video calls...\n")
+            sys.stderr.flush()
+            
+            try:
+                user_id = current_user["id"]
+                role = current_user.get("user_metadata", {}).get("role")
+                if not role:
+                    role_res = supabase_admin.table("users").select("role").eq("id", user_id).execute()
+                    role = role_res.data[0]["role"] if role_res.data else None
+                
+                if not role: return []
+
+                role_col = "caregiver_id" if role == "caregiver" else "care_recipient_id"
+                other_role_col = "care_recipient_id" if role == "caregiver" else "caregiver_id"
+                other_role_alias = "care_recipient" if role == "caregiver" else "caregiver"
+                
+                query = supabase_admin.table("video_call_requests").select(f"*, {other_role_alias}:{other_role_alias}_id(*)").eq(role_col, user_id)
+                
+                if status_filter:
+                    query = query.eq("status", status_filter)
+                
+                res = query.order("scheduled_time", desc=False).range(offset, offset + limit - 1).execute()
+                return res.data or []
+            except Exception as fallback_err:
+                sys.stderr.write(f"[DASHBOARD] [CRITICAL] Fallback failed: {str(fallback_err)}\n")
+                raise HTTPException(status_code=500, detail=f"Database connection failed: {str(e)}")
+
+        import sys
+        sys.stderr.write(f"[ERROR] get_dashboard_video_calls failed: {str(e)}\n")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)

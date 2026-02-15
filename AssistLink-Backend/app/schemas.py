@@ -98,6 +98,13 @@ class CaregiverProfileBase(BaseModel):
     bio: Optional[str] = None
     hourly_rate: Optional[float] = None
 
+    @field_validator('bio')
+    @classmethod
+    def validate_bio_field(cls, v):
+        if v:
+            return sanitize_string(v, max_length=2000)
+        return v
+
 
 class CaregiverProfileCreate(CaregiverProfileBase):
     pass
@@ -176,6 +183,13 @@ class BookingBase(BaseModel):
     specific_needs: Optional[str] = None
     is_recurring: bool = False
     recurring_pattern: Optional[Dict[str, Any]] = None
+    
+    @field_validator('specific_needs')
+    @classmethod
+    def validate_specific_needs_field(cls, v):
+        if v:
+            return sanitize_string(v, max_length=1000)
+        return v
 
 
 class BookingCreate(BookingBase):
@@ -188,6 +202,13 @@ class BookingUpdate(BaseModel):
     location: Optional[Dict[str, Any]] = None
     specific_needs: Optional[str] = None
     status: Optional[str] = None
+    
+    @field_validator('specific_needs')
+    @classmethod
+    def validate_specific_needs_field(cls, v):
+        if v:
+            return sanitize_string(v, max_length=1000)
+        return v
 
 
 class BookingResponse(BaseModel):
@@ -259,6 +280,11 @@ class MessageCreate(BaseModel):
     content: str = Field(..., min_length=1)
     message_type: str = Field(default="text", pattern="^(text|image|document)$")
     attachment_url: Optional[str] = None
+    
+    @field_validator('content')
+    @classmethod
+    def validate_content_field(cls, v):
+        return sanitize_string(v, max_length=5000)
 
 
 class MessageResponse(BaseModel):

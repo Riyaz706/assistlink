@@ -89,11 +89,15 @@ const ChatDetailsScreen = ({ route, navigation }: any) => {
       loadSessionDetails();
 
       // Poll for new messages every 2 seconds
-      pollIntervalRef.current = setInterval(() => {
+      // Poll for new messages every 2 seconds
+      pollIntervalRef.current = setInterval(async () => {
         // Silent poll, don't use main error handler for background polling
-        api.getMessages(chatSessionId, { limit: 100 })
-          .then(data => setMessages((data as any[]) || []))
-          .catch(err => console.log("Polling error:", err));
+        try {
+          const data = await api.getMessages(chatSessionId, { limit: 100 });
+          setMessages((data as any[]) || []);
+        } catch (err) {
+          console.log("Polling error:", err);
+        }
       }, 2000);
 
       return () => {

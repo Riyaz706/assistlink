@@ -3,7 +3,6 @@ import NetInfo, { NetInfoState } from '@react-native-community/netinfo';
 import { View, Text, StyleSheet, Animated } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Sentry from '@sentry/react-native';
 import { api, setOfflineHandler } from '../api/client';
 
 export interface QueueItem {
@@ -68,19 +67,11 @@ export const OfflineProvider = ({ children }: { children: ReactNode }) => {
                 console.error(`[OfflineContext] Failed to sync item ${item.id}:`, error);
 
                 // CONFLICT RESOLUTION LOGIC
-                // 409: Conflict (e.g., booking already updated)
-                // 422: Unprocessable Entity (e.g., validation failed with current state)
-                // 400: Bad Request (permanent logical issue)
                 const isPermanentError = error.statusCode === 409 || error.statusCode === 422 || error.statusCode === 400;
 
                 if (isPermanentError) {
                     console.warn(`[OfflineContext] Permanent error ${error.statusCode} for item ${item.id}. Removing from queue.`);
-                    // Log to Sentry as a sync conflict
-                    (Sentry as any).captureMessage(`Offline Sync conflict: ${error.statusCode} for ${item.path}`, {
-                        level: 'warning',
-                        extra: { item, error }
-                    });
-                    // Do NOT add to remainingQueue (discard it)
+                    // Discard it
                 } else if (error.code === 'NETWORK_ERROR' || error.statusCode === 503 || error.statusCode === 504) {
                     // It's a temporary network/server issue, keep in queue
                     remainingQueue.push(item);
@@ -113,7 +104,6 @@ export const OfflineProvider = ({ children }: { children: ReactNode }) => {
 
             // If transitioned from offline to online, trigger sync
             if (wasOffline && !offline) {
-                // We use a local ref or state value that is current
                 syncQueue(queue);
             }
         });

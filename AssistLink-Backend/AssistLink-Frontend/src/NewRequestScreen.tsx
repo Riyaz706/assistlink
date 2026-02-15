@@ -567,8 +567,9 @@ const NewRequestScreen = ({ navigation }: any) => {
 
     // Reverse geocode to get address
     if (Location && Location.reverseGeocodeAsync) {
-      Location.reverseGeocodeAsync(newLocation)
-        .then((addresses: any) => {
+      (async () => {
+        try {
+          const addresses = await Location.reverseGeocodeAsync(newLocation);
           if (addresses && addresses.length > 0) {
             const addr = addresses[0];
             const addressParts = [
@@ -581,11 +582,11 @@ const NewRequestScreen = ({ navigation }: any) => {
             ].filter(Boolean);
             setLocationText(addressParts.join(', ') || 'Selected Location');
           }
-        })
-        .catch((e: any) => {
+        } catch (e) {
           console.warn('Reverse geocoding failed:', e);
           setLocationText('Selected Location');
-        });
+        }
+      })();
     }
   };
 

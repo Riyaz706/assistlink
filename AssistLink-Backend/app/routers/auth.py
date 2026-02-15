@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, status, Depends, Request
 from fastapi.responses import RedirectResponse, JSONResponse
 from app.schemas import UserCreate, UserResponse, LoginRequest, PasswordChangeRequest
 from app.database import supabase, supabase_admin
-from app.dependencies import get_current_user, get_user_id, get_user_id
+from app.dependencies import get_current_user, get_user_id
 from app.error_handler import (
     ConflictError,
     AuthenticationError,
@@ -12,9 +12,11 @@ from app.error_handler import (
 )
 from pydantic import BaseModel
 from typing import Optional
-from typing import Optional
 import sys
 from app.limiter import limiter
+from jose import jwt, JWTError
+from datetime import datetime, timedelta, timezone
+from app.config import settings
 
 router = APIRouter()
 
@@ -94,6 +96,8 @@ async def login(request: Request, credentials: LoginRequest):
             "email": credentials.email,
             "password": credentials.password
         })
+        sys.stderr.write(f"[{request.state.request_id}] Supabase login successful for {credentials.email}\n")
+        sys.stderr.flush()
         
         if not response.user:
             raise AuthenticationError("Invalid email or password. Please check your credentials.")
@@ -141,38 +145,104 @@ async def login(request: Request, credentials: LoginRequest):
             sys.stderr.write(f"[AUTH] Login error: {str(e)}\n")
             sys.stderr.flush()
             raise AuthenticationError(f"Login failed: {str(e)}")
-        
-        if not hasattr(response.session, 'access_token') or not response.session.access_token:
-            raise AuthenticationError("Login failed: Invalid session. Please try again.")
-        
-        return {
-            "access_token": response.session.access_token,
-            "refresh_token": response.session.refresh_token if hasattr(response.session, 'refresh_token') else None,
-            "token_type": "bearer",
-            "user": response.user
-        }
-    except HTTPException:
-        # Re-raise HTTP exceptions as-is
+
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+
+@router.post("/refresh", response_model=dict)
+async def refresh_token(request: RefreshTokenRequest):
+    """
+    Refresh access token using refresh token.
+    Supports both Supabase session tokens and custom JWT tokens (Google Auth).
+    """
+    try:
+        # 1. Try Supabase refresh first (standard login)
+        try:
+            response = supabase.auth.refresh_session(request.refresh_token)
+            if response.session and response.session.access_token:
+                sys.stderr.write(f"[AUTH] Supabase session refreshed successfully\n")
+                sys.stderr.flush()
+                return {
+                    "access_token": response.session.access_token,
+                    "refresh_token": response.session.refresh_token,
+                    "token_type": "bearer",
+                    "user": response.user
+                }
+        except Exception as e:
+            # If Supabase fails, it might be a custom token or expired Supabase token
+            # Continue to custom logic
+            pass
+            
+        # 2. Try Custom JWT refresh (Google Auth)
+        try:
+            sys.stderr.write(f"[AUTH] Attempting custom JWT refresh...\n")
+            
+            # Verify the refresh token
+            payload = jwt.decode(request.refresh_token, settings.SECRET_KEY, algorithms=["HS256"])
+            
+            if payload.get("type") != "refresh":
+                raise AuthenticationError("Invalid token type")
+                
+            user_id = payload.get("sub")
+            email = payload.get("email")
+            
+            if not user_id or not email:
+                raise AuthenticationError("Invalid token payload")
+                
+            # Generate new access token
+            access_token_expires = timedelta(days=7)
+            new_access_token = jwt.encode(
+                {
+                    "sub": user_id,
+                    "email": email,
+                    "exp": datetime.now(timezone.utc) + access_token_expires,
+                },
+                settings.SECRET_KEY,
+                algorithm="HS256",
+            )
+            
+            # Generate new refresh token (rotate it)
+            refresh_token_expires = timedelta(days=30)
+            new_refresh_token = jwt.encode(
+                {
+                    "sub": user_id,
+                    "email": email,
+                    "exp": datetime.now(timezone.utc) + refresh_token_expires,
+                    "type": "refresh",
+                },
+                settings.SECRET_KEY,
+                algorithm="HS256",
+            )
+            
+            # Get user profile
+            user_response = supabase.table("users").select("*").eq("id", user_id).limit(1).execute()
+            user_data = user_response.data[0] if user_response.data else None
+            
+            sys.stderr.write(f"[AUTH] Custom JWT refreshed successfully for {email}\n")
+            sys.stderr.flush()
+            
+            return {
+                "access_token": new_access_token,
+                "refresh_token": new_refresh_token,
+                "token_type": "bearer",
+                "user": user_data
+            }
+            
+        except JWTError as jwt_err:
+            sys.stderr.write(f"[AUTH] Custom refresh failed: {jwt_err}\n")
+            raise AuthenticationError("Invalid or expired refresh token")
+        except Exception as e:
+             sys.stderr.write(f"[AUTH] Refresh error: {str(e)}\n")
+             raise AuthenticationError(f"Token refresh failed: {str(e)}")
+
+    except AuthenticationError:
         raise
     except Exception as e:
-        error_message = str(e).lower()
-        sys.stderr.write(f"[ERROR] Login error: {str(e)}\n")
-        sys.stderr.flush()
-        
-        # Provide more specific error messages
-        if "invalid login credentials" in error_message or "invalid_credentials" in error_message:
-            detail = "Invalid email or password. Please check your credentials."
-        elif "email not confirmed" in error_message or "email_not_confirmed" in error_message:
-            detail = "Email not verified. Please check your email for verification link."
-        elif "network" in error_message or "connection" in error_message:
-            detail = "Network error: Unable to connect to authentication service. Please try again."
-        else:
-            detail = f"Login failed: {str(e)}"
-        
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=detail
-        )
+        sys.stderr.write(f"[AUTH] Unexpected refresh error: {str(e)}\n")
+        raise DatabaseError(f"Refresh failed: {str(e)}")
 
 
 class ResetPasswordRequest(BaseModel):

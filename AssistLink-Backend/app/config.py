@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     RAZORPAY_KEY_SECRET: Optional[str] = None
     RAZORPAY_BYPASS_MODE: bool = False
     
+    # Video Call Configuration
+    VIDEO_PROVIDER: str = "jitsi" # Options: jitsi, twilio
+    
     # Google OAuth Configuration
     GOOGLE_WEB_CLIENT_ID: Optional[str] = None
     GOOGLE_IOS_CLIENT_ID: Optional[str] = None

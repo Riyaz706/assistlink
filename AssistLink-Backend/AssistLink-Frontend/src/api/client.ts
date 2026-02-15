@@ -11,6 +11,12 @@ function getApiBaseUrl(): string {
 }
 const API_BASE_URL = getApiBaseUrl();
 
+import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
+
+const TOKEN_KEY = 'assistlink_token';
+const REFRESH_TOKEN_KEY = 'assistlink_refresh_token';
+
 // Log the API base URL on initialization (helps debug connection issues)
 if (typeof window !== 'undefined') {
   console.log(`[API] API Base URL: ${API_BASE_URL}`);
@@ -30,16 +36,44 @@ export function setOfflineHandler(handler: OfflineHandler | null) {
   offlineHandler = handler;
 }
 
-// Helper to get token from storage (for web)
+// Helper to get token from storage
 async function getTokenFromStorage(): Promise<string | null> {
-  try {
+  if (Platform.OS === 'web') {
     if (typeof window !== 'undefined' && window.localStorage) {
-      return window.localStorage.getItem('assistlink_token');
+      return window.localStorage.getItem(TOKEN_KEY);
     }
-  } catch {
-    // ignore
+    return null;
   }
-  return null;
+  return await SecureStore.getItemAsync(TOKEN_KEY);
+}
+
+// Helper to get refresh token
+async function getRefreshToken(): Promise<string | null> {
+  if (Platform.OS === 'web') {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      return window.localStorage.getItem(REFRESH_TOKEN_KEY);
+    }
+    return null;
+  }
+  return await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+}
+
+// Helper to set refresh token
+export async function setRefreshToken(token: string | null) {
+  if (!token) {
+    if (Platform.OS === 'web') {
+      window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+    } else {
+      await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+    }
+    return;
+  }
+
+  if (Platform.OS === 'web') {
+    window.localStorage.setItem(REFRESH_TOKEN_KEY, token);
+  } else {
+    await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, token);
+  }
 }
 
 async function request<T>(
@@ -135,9 +169,64 @@ async function request<T>(
       return {} as T;
     }
 
-    return JSON.parse(text) as T;
+    try {
+      return JSON.parse(text) as T;
+    } catch (e) {
+      console.error(`[API] Failed to parse response JSON for ${path}:`, text.substring(0, 100));
+      throw new Error(`Invalid JSON response from server`);
+    }
   } catch (error: any) {
     clearTimeout(timeoutId);
+
+    const extendedOptions = options as any;
+    if (error.statusCode === 401 && !extendedOptions._retry) {
+      // Token expired, try to refresh
+      const refreshToken = await getRefreshToken();
+      if (refreshToken) {
+        try {
+          console.log('[API] Token expired, attempting refresh...');
+          // Call refresh endpoint - assuming /api/auth/refresh exists and takes refresh_token body or header
+          // NOTE: Using a fresh fetch here to avoid circular dependency or interceptor loop
+          const refreshRes = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refresh_token: refreshToken })
+          });
+
+          if (refreshRes.ok) {
+            const refreshData = await refreshRes.json();
+            const newAccessToken = refreshData.access_token;
+            const newRefreshToken = refreshData.refresh_token;
+
+            if (newAccessToken) {
+              console.log('[API] Token refresh successful');
+              setAccessToken(newAccessToken);
+              // If we got a new refresh token, save it too
+              if (newRefreshToken) {
+                await setRefreshToken(newRefreshToken);
+              }
+              // Also update storage for the access token to keep them in sync
+              if (Platform.OS === 'web') {
+                window.localStorage.setItem(TOKEN_KEY, newAccessToken);
+              } else {
+                await SecureStore.setItemAsync(TOKEN_KEY, newAccessToken);
+              }
+
+              // Retry original request with new token
+              return request(path, { ...options, _retry: true } as any);
+            }
+          } else {
+            console.warn('[API] Token refresh failed');
+            // Clear tokens
+            setAccessToken(null);
+            await setRefreshToken(null);
+            // Let the error propagate so the UI can redirect to login
+          }
+        } catch (refreshError) {
+          console.error('[API] Error during token refresh:', refreshError);
+        }
+      }
+    }
 
     // Handle abort/timeout
     if (error.name === 'AbortError') {

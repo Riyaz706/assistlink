@@ -42,7 +42,8 @@ def validate_phone(phone: str, country: str = "IN") -> str:
             raise ValueError("Invalid Indian phone number format. Use format: +91XXXXXXXXXX or 10-digit number starting with 6-9")
         # Normalize to +91 format
         if not phone.startswith("+"):
-            phone = phone.lstrip("91")
+            if phone.startswith("91") and len(phone) == 12:
+                phone = phone[2:]
             phone = f"+91{phone}"
     else:
         # General E.164 format

@@ -1,75 +1,66 @@
 import React from 'react';
-import { View, TouchableOpacity, StyleSheet, Text, Platform } from 'react-native';
+import { View, Pressable, StyleSheet, Text, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
+import { colors, typography, accessibility } from './theme';
+import { useAuth } from './context/AuthContext';
 
+/**
+ * Bottom tab navigation - PRD: 5 tabs for PWA mobile experience.
+ * Role-aware: care_recipient gets Home/Requests/Schedule/Messages/Profile;
+ * caregiver gets Home/Schedule/Messages/Profile (no Requests).
+ */
 const BottomNav = () => {
-  // Use <any> to allow navigating to any screen without strict type errors
   const navigation = useNavigation<any>();
-  
-  // Safe check for route
   const route = useRoute<any>();
+  const { user } = useAuth();
+  const isCaregiver = user?.role === 'caregiver';
 
-  // Helper to determine if a tab is active
   const isActive = (screenName: string) => route?.name === screenName;
+  const activeColor = colors.secondary;
+  const inactiveColor = colors.textSecondary;
+
+  const tabs = isCaregiver
+    ? [
+        { name: 'CaregiverDashboard', label: 'Home', icon: 'home', iconOutline: 'home-outline' },
+        { name: 'ScheduleScreen2', label: 'Schedule', icon: 'calendar-clock', iconOutline: 'calendar-clock-outline' },
+        { name: 'ChatList2', label: 'Messages', icon: 'message-text', iconOutline: 'message-text-outline' },
+        { name: 'ProfileScreen2', label: 'Profile', icon: 'account-circle', iconOutline: 'account-circle-outline' },
+      ]
+    : [
+        { name: 'CareRecipientDashboard', label: 'Home', icon: 'home', iconOutline: 'home-outline' },
+        { name: 'NewRequestScreen', label: 'Requests', icon: 'plus-circle', iconOutline: 'plus-circle-outline' },
+        { name: 'Schedule', label: 'Schedule', icon: 'calendar-clock', iconOutline: 'calendar-clock-outline' },
+        { name: 'ChatList', label: 'Messages', icon: 'message-text', iconOutline: 'message-text-outline' },
+        { name: 'Profile', label: 'Profile', icon: 'account-circle', iconOutline: 'account-circle-outline' },
+      ];
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom']}>
       <View style={styles.container}>
-      
-      {/* 1. Home Tab */}
-      <TouchableOpacity 
-        style={styles.tab} 
-        onPress={() => navigation.navigate('CareRecipientDashboard')}
-      >
-        <Icon 
-          name={isActive('CareRecipientDashboard') ? "home" : "home-outline"} 
-          size={28} 
-          color={isActive('CareRecipientDashboard') ? "#059669" : "#666"} 
-        />
-        <Text style={[styles.label, isActive('CareRecipientDashboard') && styles.activeLabel]}>Home</Text>
-      </TouchableOpacity>
-
-      {/* 2. Schedule Tab */}
-      <TouchableOpacity 
-        style={styles.tab}
-        onPress={() => navigation.navigate('Schedule')} 
-      >
-        <Icon 
-          name={isActive('Schedule') ? "calendar-clock" : "calendar-clock-outline"} 
-          size={28} 
-          color={isActive('Schedule') ? "#059669" : "#666"} 
-        />
-        <Text style={[styles.label, isActive('Schedule') && styles.activeLabel]}>Schedule</Text>
-      </TouchableOpacity>
-
-      {/* 3. Messages Tab */}
-      <TouchableOpacity 
-        style={styles.tab} 
-        onPress={() => navigation.navigate('ChatList')} 
-      >
-        <Icon 
-          name={isActive('ChatList') ? "message-text" : "message-text-outline"} 
-          size={28} 
-          color={isActive('ChatList') ? "#059669" : "#666"} 
-        />
-        <Text style={[styles.label, isActive('ChatList') && styles.activeLabel]}>Messages</Text>
-      </TouchableOpacity>
-
-      {/* 4. Profile Tab */}
-      <TouchableOpacity 
-        style={styles.tab}
-        onPress={() => navigation.navigate('Profile')} 
-      >
-        <Icon 
-          name={isActive('Profile') ? "account-circle" : "account-circle-outline"} 
-          size={28} 
-          color={isActive('Profile') ? "#059669" : "#666"} 
-        />
-        <Text style={[styles.label, isActive('Profile') && styles.activeLabel]}>Profile</Text>
-      </TouchableOpacity>
-
+        {tabs.map(({ name, label, icon, iconOutline }) => {
+          const active = isActive(name);
+          return (
+            <Pressable
+              key={name}
+              style={({ pressed }) => [styles.tab, pressed && styles.tabPressed]}
+              onPress={() => navigation.navigate(name)}
+              delayPressIn={0}
+              delayLongPress={200}
+              accessibilityRole="button"
+              accessibilityLabel={label}
+              accessibilityState={{ selected: active }}
+            >
+              <Icon
+                name={active ? icon : iconOutline}
+                size={26}
+                color={active ? activeColor : inactiveColor}
+              />
+              <Text style={[styles.label, active && styles.activeLabel]}>{label}</Text>
+            </Pressable>
+          );
+        })}
       </View>
     </SafeAreaView>
   );
@@ -77,34 +68,38 @@ const BottomNav = () => {
 
 const styles = StyleSheet.create({
   safeArea: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.card,
   },
   container: {
     flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.card,
     paddingVertical: 10,
-    paddingHorizontal: 20,
+    paddingHorizontal: 8,
     borderTopWidth: 1,
-    borderTopColor: '#EEE',
+    borderTopColor: colors.border,
     justifyContent: 'space-between',
     alignItems: 'center',
-    minHeight: 70,
+    minHeight: Math.max(70, accessibility.minTouchTargetSize + 16),
     paddingBottom: Platform.OS === 'android' ? 8 : 10,
   },
   tab: {
     alignItems: 'center',
     justifyContent: 'center',
-    width: 60,
+    minWidth: 56,
+    minHeight: accessibility.minTouchTargetSize,
+  },
+  tabPressed: {
+    opacity: 0.6,
   },
   label: {
-    fontSize: 10,
+    fontSize: typography.bodySmall,
     marginTop: 4,
-    color: '#666',
+    color: colors.textSecondary,
   },
   activeLabel: {
-    color: '#059669',
-    fontWeight: 'bold',
-  }
+    color: colors.secondary,
+    fontWeight: typography.weightSemiBold,
+  },
 });
 
-export default BottomNav ;
+export default BottomNav;

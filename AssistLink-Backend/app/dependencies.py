@@ -76,17 +76,14 @@ async def get_current_user(
                      detail = "Authentication failed: Token is expired or invalid. Please log in again."
                  else:
                      detail = f"Authentication failed: {error_str}"
-                 raise HTTPException(
-                     status_code=status.HTTP_401_UNAUTHORIZED,
-                     detail=detail
-                 )
+                 from app.error_handler import AuthenticationError
+                 raise AuthenticationError(detail)
+
         
         user = response.user if hasattr(response, 'user') else response
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authentication credentials: user not found"
-            )
+            from app.error_handler import AuthenticationError
+            raise AuthenticationError("Invalid authentication credentials: user not found")
         
         # Convert user object to dict if needed
         user_dict = None
@@ -188,11 +185,13 @@ async def verify_care_recipient(current_user: dict = Depends(get_current_user)) 
             detail="Invalid user data"
         )
 
+    from src.config.db import execute_query
     sys.stderr.write(f"[VERIFY_CR] Checking user role in database...\n")
     sys.stderr.flush()
     try:
-        response = supabase_admin.table("users").select("role").eq("id", user_id).execute()
-        data = response.data[0] if response.data else None
+        # Use direct SQL for much faster role checks
+        response = execute_query("SELECT role FROM users WHERE id = %s", (user_id,))
+        data = response[0] if response else None
         sys.stderr.write(f"[VERIFY_CR] User role from DB: {data.get('role') if data else 'None'}\n")
         sys.stderr.flush()
     except Exception as e:
@@ -238,8 +237,8 @@ async def verify_care_recipient(current_user: dict = Depends(get_current_user)) 
             sys.stderr.write(f"[VERIFY_CR] User has role '{data.get('role')}', attempting to update to 'care_recipient'\n")
             sys.stderr.flush()
             try:
-                # Update role to care_recipient
-                supabase_admin.table("users").update({"role": "care_recipient"}).eq("id", user_id).execute()
+                # Update role to care_recipient using direct SQL
+                execute_query("UPDATE users SET role = 'care_recipient' WHERE id = %s", (user_id,), fetch=False)
                 sys.stderr.write(f"[VERIFY_CR] Successfully updated user role to 'care_recipient'\n")
                 sys.stderr.flush()
                 data = {"role": "care_recipient"}
@@ -283,10 +282,11 @@ async def verify_caregiver(current_user: dict = Depends(get_current_user)) -> di
             detail="Invalid user data"
         )
 
-    # Try to get user profile to check role - use supabase_admin to bypass RLS
+    from src.config.db import execute_query
+    # Try to get user profile to check role - use direct SQL
     try:
-        response = supabase_admin.table("users").select("role").eq("id", user_id).execute()
-        data = response.data[0] if response.data else None
+        response = execute_query("SELECT role FROM users WHERE id = %s", (user_id,))
+        data = response[0] if response else None
     except Exception:
         data = None
 

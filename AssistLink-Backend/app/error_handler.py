@@ -137,10 +137,17 @@ def create_error_response(
         if error.details:
             response["error"]["details"] = error.details
     elif isinstance(error, HTTPException):
+        detail = error.detail
+        if isinstance(detail, list):
+            message = "; ".join(
+                d.get("msg", str(d)) for d in detail
+            ) if detail else "Validation failed"
+        else:
+            message = str(detail) if detail else "Request failed"
         response = {
             "error": {
                 "code": f"HTTP_{error.status_code}",
-                "message": error.detail,
+                "message": message,
                 "status": error.status_code,
                 "request_id": request_id,
                 "timestamp": datetime.utcnow().isoformat()

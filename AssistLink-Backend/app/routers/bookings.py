@@ -23,6 +23,7 @@ from app.services.notifications import (
     notify_chat_enabled,
     notify_video_call_joined
 )
+from app.services.video import generate_video_call_url
 import uuid
 
 router = APIRouter()
@@ -72,8 +73,7 @@ async def create_video_call_request(
             "scheduled_time": scheduled_time_iso,
             "duration_seconds": video_call_data.duration_seconds,
             "status": "pending",
-            "status": "pending",
-            "video_call_url": f"https://meet.jit.si/assistlink-{uuid.uuid4()}"  # Jitsi Meet URL
+            "video_call_url": generate_video_call_url()
         }
         
         print(f"[INFO] Video call dict to insert: {video_call_dict}", flush=True)
