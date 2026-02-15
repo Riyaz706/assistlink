@@ -1,5 +1,5 @@
 // Load .env - Expo loads EXPO_PUBLIC_* automatically, but we expose in extra for reliability
-const apiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || 'https://assistlink-nd65.onrender.com';
+const apiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || 'https://assistlink-backend.onrender.com';
 
 export default {
   expo: {
@@ -51,6 +51,9 @@ export default {
       eas: { projectId: '27503afd-27f0-43cb-b2e2-c6142e7f8efb' },
       apiBaseUrl,
       EXPO_PUBLIC_API_BASE_URL: apiBaseUrl,
+      EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+      EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+      EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
     },
     owner: 'riyaz_26',
   },

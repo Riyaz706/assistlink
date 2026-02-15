@@ -180,23 +180,32 @@ async def send_push_notification(
             google_app_creds = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
             
             if not service_account_path and not google_app_creds:
-                 print("⚠️ FCM not configured, skipping native tokens", file=sys.stderr, flush=True)
+                 print("⚠️ FCM NOT CONFIGURED: Neither FCM_SERVICE_ACCOUNT_PATH nor GOOGLE_APPLICATION_CREDENTIALS set.", file=sys.stderr, flush=True)
             else:
-                 # Initialize Firebase Admin SDK (same logic as before)
+                 # Initialize Firebase Admin SDK
                  try:
                     import firebase_admin
                     from firebase_admin import credentials, messaging
                     
                     if not firebase_admin._apps:
+                        print(f"🔧 Initializing Firebase Admin SDK...", file=sys.stderr, flush=True)
                         if service_account_path:
+                             print(f"   Using service account path: {service_account_path}", file=sys.stderr, flush=True)
                              if not os.path.isabs(service_account_path):
-                                project_root = Path(__file__).parent.parent.parent
-                                service_account_path = str(project_root / service_account_path)
+                                 project_root = Path(__file__).parent.parent.parent
+                                 service_account_path = str(project_root / service_account_path)
+                             
+                             if not os.path.exists(service_account_path):
+                                 print(f"❌ ERROR: Service account file not found at {service_account_path}", file=sys.stderr, flush=True)
+                                 return False
+                                 
                              cred = credentials.Certificate(service_account_path)
                              firebase_admin.initialize_app(cred)
                         elif google_app_creds:
+                            print(f"   Using Application Default Credentials (ADC)", file=sys.stderr, flush=True)
                             cred = credentials.ApplicationDefault()
                             firebase_admin.initialize_app(cred)
+                        print("✅ Firebase Admin SDK initialized successfully.", file=sys.stderr, flush=True)
                     
                     # Send loop for native tokens
                     data_payload = data or {}
