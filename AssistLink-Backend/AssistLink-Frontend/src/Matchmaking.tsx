@@ -192,6 +192,11 @@ const MatchmakingScreen = ({ navigation }: any) => {
   const renderSelectionModal = () => {
     if (!selectedCaregiver) return null;
 
+    const isVideoCall = !serviceType || serviceType === 'video_call';
+    const serviceTitle = serviceType === 'exam_assistance' ? 'Exam Assistance' :
+      serviceType === 'daily_care' ? 'Daily Care' :
+        serviceType === 'one_time' ? 'Urgent Care' : 'Video Call';
+
     return (
       <Modal
         animationType="fade"
@@ -216,10 +221,10 @@ const MatchmakingScreen = ({ navigation }: any) => {
                 <View style={styles.successIconCircle}>
                   <Ionicons name="checkmark" size={48} color="#FFF" />
                 </View>
-                <Text style={styles.successTitle}>Video Call Request Sent!</Text>
+                <Text style={styles.successTitle}>Request Sent!</Text>
                 <Text style={styles.successSubtitle}>
-                  Your video call request has been sent to {selectedCaregiver.name.split(',')[0]}.
-                  Once both parties accept, a booking will be created for payment.
+                  Your {isVideoCall ? 'video call' : 'booking'} request has been sent to {selectedCaregiver.name.split(',')[0]}.
+                  Once they accept, you will be notified{isVideoCall ? ' to join the call' : ' to proceed with payment'}.
                 </Text>
                 <TouchableOpacity
                   style={styles.successDoneBtn}
@@ -229,7 +234,7 @@ const MatchmakingScreen = ({ navigation }: any) => {
                 </TouchableOpacity>
               </View>
             ) : bookingStep === 'type' ? (
-              /* STEP 2: BOOK ZOOM (ONLY OPTION) */
+              /* STEP 2: BOOKING CONFIRMATION */
               <>
                 <View style={styles.popupHeader}>
                   {selectedCaregiver.image ? (
@@ -239,71 +244,81 @@ const MatchmakingScreen = ({ navigation }: any) => {
                       <MaterialCommunityIcons name="account" size={40} color="#6B7280" />
                     </View>
                   )}
-                  <Text style={styles.popupTitle}>Book {selectedCaregiver.name.split(',')[0]}?</Text>
+                  <Text style={styles.popupTitle}>Book for {serviceTitle}?</Text>
                   <Text style={styles.popupSubtitle}>
-                    Request a 15-second video call with this caregiver.
+                    {isVideoCall
+                      ? "Request a 15-second video call with this caregiver."
+                      : `Request ${serviceTitle} with ${selectedCaregiver.name.split(',')[0]}.`}
                   </Text>
                 </View>
 
                 <View style={styles.popupActions}>
                   <TouchableOpacity
-                    style={[styles.popupButton, { backgroundColor: '#2563EB', marginTop: 0 }]}
+                    style={[styles.popupButton, { backgroundColor: '#059669', marginTop: 0 }]}
                     onPress={async () => {
                       try {
-                        console.log('📞 Creating video call request for caregiver:', selectedCaregiver.id);
-                        console.log('📅 examDateTime:', examDateTime);
+                        console.log('📞 Creating request for caregiver:', selectedCaregiver.id);
 
                         // Parse date more robustly
                         let when: Date;
-                        if (examDateTime && typeof examDateTime === 'string') {
-                          // Try parsing with custom parser first
-                          const parsed = parseDateTimeString(examDateTime);
-                          if (parsed) {
-                            when = parsed;
-                          } else {
-                            // Fallback to standard Date parsing
-                            const standardParse = new Date(examDateTime);
-                            if (!isNaN(standardParse.getTime())) {
-                              when = standardParse;
-                            } else {
-                              console.warn('⚠️ Invalid date format, using current time + 1 hour:', examDateTime);
-                              when = new Date();
-                              when.setHours(when.getHours() + 1);
-                            }
+                        const dateToParse = serviceType === 'daily_care' ? dailyDateTime : examDateTime;
+
+                        if (dateToParse && typeof dateToParse === 'string') {
+                          const parsed = parseDateTimeString(dateToParse);
+                          when = parsed || new Date();
+                        } else {
+                          when = new Date();
+                          if (isVideoCall) when.setHours(when.getHours() + 1);
+                        }
+
+                        if (isVideoCall) {
+                          console.log('Creating Video Call Request');
+                          const created = await api.createVideoCallRequest({
+                            caregiver_id: selectedCaregiver.id,
+                            scheduled_time: when.toISOString(),
+                            duration_seconds: 15,
+                          });
+
+                          // Auto-accept on behalf of care recipient so status moves forward
+                          if ((created as any)?.id) {
+                            await api.acceptVideoCallRequest((created as any).id, true);
                           }
                         } else {
-                          // Use current time + 1 hour as default
-                          when = new Date();
-                          when.setHours(when.getHours() + 1);
+                          console.log('Creating Booking Request: ', serviceType);
+                          // Parse duration string to float hours
+                          let durationHours = 1.0;
+                          // Add parsing logic for "2h 30m" -> 2.5
+                          // Placeholder logic - assuming NewRequestScreen might pass raw strings like "2h 30m"
+                          // If route params doesn't have it, default to 1.0
+
+                          // Construct location object
+                          const bookingLocation = route.params?.location ? {
+                            ...route.params.location,
+                            address: locationText
+                          } : { latitude: 0, longitude: 0, address: locationText };
+
+                          await api.createBooking({
+                            caregiver_id: selectedCaregiver.id,
+                            service_type: serviceType,
+                            scheduled_date: when.toISOString(),
+                            duration_hours: 2.0, // Defaulting for now as parsing logic is complex inside JSX
+                            location: bookingLocation,
+                            specific_needs: assistanceType // 'scribe' or 'reader' etc.
+                          });
                         }
 
-                        console.log('📅 Using scheduled time:', when.toISOString());
-
-                        const created = await api.createVideoCallRequest({
-                          caregiver_id: selectedCaregiver.id,
-                          scheduled_time: when.toISOString(),
-                          duration_seconds: 15,
-                        });
-                        console.log('✅ Video call request created:', created);
-                        // Auto-accept on behalf of care recipient so status moves forward
-                        if ((created as any)?.id) {
-                          console.log('📞 Auto-accepting video call request:', (created as any).id);
-                          await api.acceptVideoCallRequest((created as any).id, true);
-                          console.log('✅ Video call request accepted');
-                        }
                         setBookingStep('success');
                       } catch (e: any) {
-                        console.error('❌ Error creating video call request:', e);
-                        // Show error to user but still show success modal
-                        Alert.alert('Error', e?.message || 'Failed to create video call request. Please try again.');
-                        setBookingStep('success'); // Still show success to not block user
+                        console.error('❌ Error creating request:', e);
+                        Alert.alert('Error', e?.message || 'Failed to create request. Please try again.');
+                        // Do not proceed to success on error
                       }
                     }}
                   >
-                    <Ionicons name="videocam" size={20} color="#FFF" style={{ marginRight: 8 }} />
+                    <Ionicons name={isVideoCall ? "videocam" : "calendar"} size={20} color="#FFF" style={{ marginRight: 8 }} />
                     <View>
-                      <Text style={styles.popupButtonTitle}>Book Zoom</Text>
-                      <Text style={styles.popupButtonSub}>15-second Video Call</Text>
+                      <Text style={styles.popupButtonTitle}>{isVideoCall ? "Book Video Call" : "Send Booking Request"}</Text>
+                      <Text style={styles.popupButtonSub}>{isVideoCall ? "15-sec intro session" : "Wait for acceptance"}</Text>
                     </View>
                   </TouchableOpacity>
                 </View>

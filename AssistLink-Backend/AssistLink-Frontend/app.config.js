@@ -40,6 +40,11 @@ export default {
         'android.permission.MODIFY_AUDIO_SETTINGS',
       ],
       usesCleartextTraffic: true, // Allow http:// for local dev backend
+      config: {
+        googleMaps: {
+          apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
+        },
+      },
     },
     plugins: [
       ['expo-camera', { cameraPermission: 'Allow AssistLink to access your camera for video calls.' }],

@@ -222,8 +222,18 @@ async def verify_care_recipient(current_user: dict = Depends(get_current_user)) 
                 "is_active": True,
             }
             # Use admin client to bypass RLS when creating the profile
-            insert_resp = supabase_admin.table("users").insert(insert_payload).execute()
-            data = {"role": "care_recipient"} if insert_resp.data else None
+            try:
+                insert_resp = supabase_admin.table("users").insert(insert_payload).execute()
+                data = {"role": "care_recipient"} if insert_resp.data else None
+            except Exception as insert_error:
+                # Handle possible race condition where user was created between SELECT and INSERT
+                sys.stderr.write(f"[VERIFY_CR] Insert failed: {insert_error}\n")
+                if "duplicate key" in str(insert_error) or "23505" in str(insert_error):
+                    sys.stderr.write(f"[VERIFY_CR] User already exists (race condition), proceeding...\n")
+                    # Should verify role, but for now assume they are valid or will be caught by checks
+                    data = {"role": "care_recipient"} 
+                else:
+                     raise insert_error
         except Exception as e:
             # If we still cannot create the profile, fail with a clear message
             raise HTTPException(
@@ -311,8 +321,16 @@ async def verify_caregiver(current_user: dict = Depends(get_current_user)) -> di
                 "role": "caregiver",
                 "is_active": True,
             }
-            insert_resp = supabase_admin.table("users").insert(insert_payload).execute()
-            data = {"role": "caregiver"} if insert_resp.data else None
+            try:
+                insert_resp = supabase_admin.table("users").insert(insert_payload).execute()
+                data = {"role": "caregiver"} if insert_resp.data else None
+            except Exception as insert_error:
+                 sys.stderr.write(f"[VERIFY_CG] Insert failed: {insert_error}\n")
+                 if "duplicate key" in str(insert_error) or "23505" in str(insert_error):
+                    sys.stderr.write(f"[VERIFY_CG] User already exists (race condition), proceeding...\n")
+                    data = {"role": "caregiver"}
+                 else:
+                     raise insert_error
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

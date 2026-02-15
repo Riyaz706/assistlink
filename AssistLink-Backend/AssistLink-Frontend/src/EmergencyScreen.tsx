@@ -23,7 +23,15 @@ const EmergencyScreen = ({ navigation, route }: { navigation: any; route?: any }
   const { user } = useAuth();
   const [alertSent, setAlertSent] = useState(false);
   const isCaregiver = user?.role === 'caregiver';
-  const notification = route?.params?.notification;
+
+  // Robust param handling
+  const params = route?.params || {};
+  const notification = params.notification;
+  const data = notification?.data || params;
+
+  const recipientName = notification?.recipientName || data?.care_recipient_name || 'RECIPIENT';
+  const recipientPhoto = data?.care_recipient_photo || 'https://via.placeholder.com/150';
+  const locationInfo = data?.location || {};
 
   // Get emergency contact from user profile
   const emergencyContact = user?.emergency_contact as { name?: string; phone?: string } | null;
@@ -190,14 +198,14 @@ const EmergencyScreen = ({ navigation, route }: { navigation: any; route?: any }
         <View style={styles.statusContainer}>
           <Text style={[styles.statusText, isCaregiver && { color: COLORS.white, fontWeight: 'bold', fontSize: 20 }]}>
             {isCaregiver
-              ? `REQUEST FROM ${notification?.recipientName || 'RECIPIENT'}`
+              ? `REQUEST FROM ${recipientName}`
               : alertSent ? "ALERTS SENT SUCCESSFULLY" : "Notifying your caregivers..."}
           </Text>
 
           {isCaregiver ? (
             <View style={styles.recipientPhotoContainer}>
               <Image
-                source={{ uri: notification?.data?.care_recipient_photo || 'https://via.placeholder.com/150' }}
+                source={{ uri: recipientPhoto }}
                 style={styles.recipientLargePhoto}
               />
             </View>
@@ -223,7 +231,7 @@ const EmergencyScreen = ({ navigation, route }: { navigation: any; route?: any }
           <Ionicons name="location" size={16} color={COLORS.primaryRed} />
           <Text style={styles.locationText}>
             {isCaregiver
-              ? `Location: ${notification?.data?.location?.location_name || 'Not provided'}`
+              ? `Location: ${locationInfo?.location_name || 'Not provided'}`
               : "Location shared: Near 123 Maple Ave"}
           </Text>
         </View>
@@ -248,8 +256,8 @@ const EmergencyScreen = ({ navigation, route }: { navigation: any; route?: any }
             <TouchableOpacity
               style={styles.callButton}
               onPress={() => {
-                if (notification?.data?.care_recipient_phone) {
-                  Linking.openURL(`tel:${notification.data.care_recipient_phone}`);
+                if (data?.care_recipient_phone) {
+                  Linking.openURL(`tel:${data.care_recipient_phone}`);
                 } else {
                   Alert.alert("Error", "Contact number not available.");
                 }

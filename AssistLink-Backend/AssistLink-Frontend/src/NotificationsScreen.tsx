@@ -87,6 +87,17 @@ const NotificationsScreen = ({ navigation }: any) => {
           }
           break;
 
+        case 'emergency':
+          if (data?.emergency_id) {
+            navigation.navigate('EmergencyScreen', {
+              emergencyId: data.emergency_id,
+              location: data.location
+            });
+          } else {
+            navigation.navigate('EmergencyScreen');
+          }
+          break;
+
         default:
           // Just mark as read
           break;
@@ -135,7 +146,7 @@ const NotificationsScreen = ({ navigation }: any) => {
 
           {/* --- ICON / AVATAR AREA --- */}
           <View style={styles.iconContainer}>
-            {type === 'request' || type === 'message' || type === 'review' || type === 'video_call' || type === 'booking' ? (
+            {type === 'request' || type === 'message' || type === 'review' || type === 'video_call' || type === 'booking' || type === 'emergency' ? (
               <View>
                 {item.avatar ? (
                   <Image
@@ -143,8 +154,12 @@ const NotificationsScreen = ({ navigation }: any) => {
                     style={styles.avatar}
                   />
                 ) : (
-                  <View style={styles.avatarPlaceholder}>
-                    <MaterialCommunityIcons name="account" size={24} color="#6B7280" />
+                  <View style={[styles.avatarPlaceholder, type === 'emergency' && { backgroundColor: '#FEE2E2' }]}>
+                    <MaterialCommunityIcons
+                      name={type === 'emergency' ? "alert-decagram" : "account"}
+                      size={24}
+                      color={type === 'emergency' ? COLORS.red : "#6B7280"}
+                    />
                   </View>
                 )}
                 {type === 'request' && (
@@ -158,6 +173,9 @@ const NotificationsScreen = ({ navigation }: any) => {
                 )}
                 {type === 'message' && (
                   <View style={styles.miniBadgeGreen}><Ionicons name="chatbubble" size={10} color="#FFF" /></View>
+                )}
+                {type === 'emergency' && (
+                  <View style={[styles.miniBadgeBlue, { backgroundColor: COLORS.red }]}><Ionicons name="warning" size={10} color="#FFF" /></View>
                 )}
               </View>
             ) : (
@@ -174,7 +192,7 @@ const NotificationsScreen = ({ navigation }: any) => {
           {/* --- TEXT CONTENT --- */}
           <View style={styles.textContainer}>
             <View style={styles.headerRow}>
-              <Text style={styles.itemTitle}>{title}</Text>
+              <Text style={[styles.itemTitle, type === 'emergency' && { color: COLORS.red }]}>{title}</Text>
               {isUnread && <View style={styles.unreadDot} />}
             </View>
 
@@ -198,6 +216,43 @@ const NotificationsScreen = ({ navigation }: any) => {
         </View>
 
         {/* --- ACTIONS --- */}
+        {/* Booking Request Actions */}
+        {type === 'booking' && user?.role === 'caregiver' && item.title?.includes('New Booking') && (
+          <View style={styles.actionRow}>
+            <TouchableOpacity
+              style={styles.acceptBtn}
+              onPress={async () => {
+                try {
+                  if (item.data?.booking_id) {
+                    await api.updateBooking(item.data.booking_id, { status: 'accepted' });
+                    await loadNotifications();
+                  }
+                } catch (e) {
+                  handleError(e, 'accept-booking');
+                }
+              }}
+            >
+              <Text style={styles.acceptBtnText}>Accept Request</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.closeBtn}
+              onPress={async () => {
+                try {
+                  if (item.data?.booking_id) {
+                    await api.updateBooking(item.data.booking_id, { status: 'declined' });
+                    await loadNotifications();
+                  }
+                } catch (e) {
+                  handleError(e, 'decline-booking');
+                }
+              }}
+            >
+              <Text style={{ color: '#666', fontWeight: '600' }}>Decline</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Legacy Request Actions (if any) */}
         {type === 'request' && (
           <View style={styles.actionRow}>
             <TouchableOpacity style={styles.acceptBtn}>
