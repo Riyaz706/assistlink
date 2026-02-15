@@ -41,3 +41,5 @@ services:
         sync: false
       - key: FCM_SERVICE_ACCOUNT_PATH
         sync: false
+
+# Triggering new deployment detection
