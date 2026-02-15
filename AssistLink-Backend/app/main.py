@@ -2,10 +2,72 @@ from fastapi import FastAPI, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
-# ... existing imports ...
+from app.routers import auth, users, caregivers, bookings, location, dashboard, chat, notifications, payments, google_auth, test, emergency
+from app.config import settings
+from src.config.db import get_db_connection, return_db_connection
+from app.error_handler import (
+    AppError,
+    app_error_handler,
+    http_exception_handler,
+    validation_exception_handler,
+    generic_exception_handler
+)
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from app.limiter import limiter
+import time
+import traceback
+import uuid
+import sys
 
-# ... existing code ...
+app = FastAPI(
+    title="AssistLink Backend API",
+    description="Backend API for AssistLink - Connecting care recipients with caregivers",
+    version="1.0.0"
+)
 
+# Add request logging middleware with request ID tracking - MUST be before CORS middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    # Generate unique request ID for tracking
+    request_id = str(uuid.uuid4())
+    request.state.request_id = request_id
+    
+    start_time = time.time()
+    path_str = str(request.url.path)
+    url_str = str(request.url)
+    
+    # Log ALL requests with request ID
+    sys.stderr.write(f"[{request_id}] {request.method} {path_str}\n")
+    sys.stderr.flush()
+    
+    # Log all requests to payment endpoints with more detail
+    if "/api/payments" in path_str or "/api/payments" in url_str:
+        sys.stderr.write(f"[{request_id}] ===== PAYMENT REQUEST =====\n")
+        sys.stderr.write(f"[{request_id}] Method: {request.method}\n")
+        sys.stderr.write(f"[{request_id}] Full URL: {url_str}\n")
+        auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
+        sys.stderr.write(f"[{request_id}] Auth: {'Present' if auth_header else 'Missing'}\n")
+        sys.stderr.flush()
+    
+    try:
+        response = await call_next(request)
+        process_time = time.time() - start_time
+        
+        # Add request ID to response headers for client-side debugging
+        response.headers["X-Request-ID"] = request_id
+        
+        # Log completion with time for ALL requests
+        sys.stderr.write(f"[{request_id}] DONE {response.status_code} in {process_time:.3f}s\n")
+        sys.stderr.flush()
+        
+        return response
+    except HTTPException as http_exc:
+        process_time = time.time() - start_time
+        sys.stderr.write(f"[{request_id}] HTTPException: {http_exc.status_code} - {http_exc.detail} after {process_time:.3f}s\n")
+        sys.stderr.flush()
+        raise
     except ResponseValidationError as validation_exc:
         process_time = time.time() - start_time
         sys.stderr.write(f"[{request_id}] Response Validation Error after {process_time:.3f}s\n")
@@ -18,13 +80,17 @@ from fastapi.exceptions import RequestValidationError, ResponseValidationError
             content={"detail": "Internal Server Error: Response validation failed"}
         )
     except Exception as e:
-# ... existing code ...
+        process_time = time.time() - start_time
+        sys.stderr.write(f"[{request_id}] ERROR: {type(e).__name__}: {str(e)} after {process_time:.3f}s\n")
+        traceback.print_exc(file=sys.stderr)
+        sys.stderr.flush()
+        raise
 
 # Register custom error handlers
 app.add_exception_handler(AppError, app_error_handler)
 app.add_exception_handler(HTTPException, http_exception_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
-app.add_exception_handler(ResponseValidationError, validation_exception_handler) # Reuse or create specific
+app.add_exception_handler(ResponseValidationError, validation_exception_handler)
 app.add_exception_handler(Exception, generic_exception_handler)
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -139,4 +205,3 @@ async def shutdown_event():
     """Clean up database connections on shutdown"""
     from src.config.db import close_all_connections
     close_all_connections()
-
