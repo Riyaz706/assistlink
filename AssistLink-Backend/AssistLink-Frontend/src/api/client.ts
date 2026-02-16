@@ -7,7 +7,7 @@ function getApiBaseUrl(): string {
     const fromExtra = Constants.expoConfig?.extra?.apiBaseUrl || Constants.expoConfig?.extra?.EXPO_PUBLIC_API_BASE_URL;
     if (fromExtra) return String(fromExtra).replace(/\/$/, '');
   } catch { }
-  return 'https://assistlink-nd65.onrender.com';
+  return 'https://assistlink-backend.onrender.com';
 }
 const API_BASE_URL = getApiBaseUrl();
 
