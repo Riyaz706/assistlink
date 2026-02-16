@@ -473,11 +473,12 @@ export const api = {
 
   // Bookings
   createBooking: (data: {
-    service_type: "exam_assistance" | "daily_care" | "one_time" | "recurring";
+    service_type: "exam_assistance" | "daily_care" | "one_time" | "recurring" | "urgent_care" | string;
     scheduled_date: string; // ISO datetime
     duration_hours?: number;
     location?: any;
-    specific_needs?: string;
+    specific_requirements?: string;
+    urgency_level?: string;
     is_recurring?: boolean;
     recurring_pattern?: any;
     caregiver_id?: string;
@@ -487,16 +488,60 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  processPayment: (bookingId: string) =>
+    request(`/api/bookings/${bookingId}/payment`, { // This endpoint doesn't exist yet but we'll mock it or implement it
+      method: "POST",
+      body: JSON.stringify({ amount: 100 }) // Dummy amount
+    }),
+
   updateBooking: (bookingId: string, data: { status?: string;[key: string]: any }) =>
     request(`/api/bookings/${bookingId}`, {
       method: "PATCH",
       body: JSON.stringify(data),
     }),
 
+  // Polling-based subscription for realtime updates (fallback for missing supabase-js)
+  subscribeToBooking: (bookingId: string, callback: (data: any) => void, intervalMs = 5000) => {
+    // Initial fetch
+    request(`/api/bookings/${bookingId}`).then(data => callback(data)).catch(err => console.error("Poll error", err));
+
+    const intervalId = setInterval(() => {
+      request(`/api/bookings/${bookingId}`)
+        .then(data => callback(data))
+        .catch(err => console.error("Poll error", err));
+    }, intervalMs);
+    return intervalId;
+  },
+
+  unsubscribeFromBooking: (subscriptionHandle: any) => {
+    if (subscriptionHandle) clearInterval(subscriptionHandle);
+  },
+
   cancelBooking: (bookingId: string) =>
     request(`/api/bookings/${bookingId}`, {
       method: "PATCH",
       body: JSON.stringify({ status: "cancelled" }),
+    }),
+
+  respondToBooking: (bookingId: string, status: "accepted" | "rejected", reason?: string) =>
+    request(`/api/bookings/${bookingId}/respond`, {
+      method: "POST",
+      body: JSON.stringify({ status, reason }),
+    }),
+
+  updateBookingStatus: (bookingId: string, status: string, reason?: string) =>
+    request(`/api/bookings/${bookingId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status, reason }),
+    }),
+
+  getBookingHistory: (bookingId: string) =>
+    request<any[]>(`/api/bookings/${bookingId}/history`),
+
+  addBookingNote: (bookingId: string, note: string, isPrivate: boolean = false) =>
+    request(`/api/bookings/${bookingId}/notes`, {
+      method: "POST",
+      body: JSON.stringify({ note, is_private: isPrivate }),
     }),
 
   // Dashboard
@@ -555,15 +600,18 @@ export const api = {
     razorpay_payment_id: string;
     razorpay_signature: string;
   }) =>
-    request<{
-      success: boolean;
-      message: string;
-      booking_id?: string;
-      chat_session_id?: string;
-    }>("/api/payments/verify", {
+    request("/api/payments/verify", {
       method: "POST",
       body: JSON.stringify(data),
     }),
+
+  // Twilio Video
+  getVideoToken: (bookingId: string) =>
+    request<{ token: string; room_name: string; identity: string }>("/api/communications/video/token", {
+      method: "POST",
+      body: JSON.stringify({ booking_id: bookingId }),
+    }),
+
 
   // Bookings
   completePayment: (bookingId: string) =>

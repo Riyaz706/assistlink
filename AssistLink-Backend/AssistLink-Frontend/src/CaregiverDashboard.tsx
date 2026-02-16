@@ -105,22 +105,27 @@ const CaregiverDashboard = ({ navigation }: { navigation: any }) => {
       dataObject
     });
 
-    navigation.navigate('CaregiverAppointmentDetailScreen', {
-      appointment: {
-        id: item.id,
-        recipient: item.clientName,
-        service: item.service,
-        status: item.status || 'Pending',
-        date: item.time,
-        time: item.time,
-        location: item.address,
-        image: item.image,
-        bookingData: dataObject, // Pass the actual data
-        isVideoCall: isVideoCall, // Flag to identify video calls
-        videoCallUrl: isVideoCall ? dataObject.video_call_url : undefined,
-        bookingId: dataObject.booking_id || undefined,
-      }
-    });
+    if (isVideoCall) {
+      navigation.navigate('CaregiverAppointmentDetailScreen', {
+        appointment: {
+          id: item.id,
+          recipient: item.clientName,
+          service: item.service,
+          status: item.status || 'Pending',
+          date: item.time,
+          time: item.time,
+          location: item.address,
+          image: item.image,
+          bookingData: dataObject, // Pass the actual data
+          isVideoCall: isVideoCall, // Flag to identify video calls
+          videoCallUrl: isVideoCall ? dataObject.video_call_url : undefined,
+          bookingId: dataObject.booking_id || undefined,
+        }
+      });
+    } else {
+      // For regular bookings, use the robust BookingDetailScreen
+      navigation.navigate('BookingDetailScreen', { bookingId: item.id });
+    }
   };
 
   return (

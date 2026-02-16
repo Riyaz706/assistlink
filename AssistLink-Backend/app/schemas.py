@@ -183,10 +183,12 @@ class BookingBase(BaseModel):
     specific_needs: Optional[str] = None
     is_recurring: bool = False
     recurring_pattern: Optional[Dict[str, Any]] = None
+    urgency_level: str = Field(default="medium", pattern="^(low|medium|high|emergency)$")
+    specific_requirements: Optional[str] = None
     
-    @field_validator('specific_needs')
+    @field_validator('specific_needs', 'specific_requirements')
     @classmethod
-    def validate_specific_needs_field(cls, v):
+    def validate_text_fields(cls, v):
         if v:
             return sanitize_string(v, max_length=1000)
         return v
@@ -194,6 +196,7 @@ class BookingBase(BaseModel):
 
 class BookingCreate(BookingBase):
     caregiver_id: Optional[UUID] = None
+    status: str = Field(default="requested", pattern="^(draft|requested)$")
 
 
 class BookingUpdate(BaseModel):
@@ -201,11 +204,14 @@ class BookingUpdate(BaseModel):
     duration_hours: Optional[float] = None
     location: Optional[Dict[str, Any]] = None
     specific_needs: Optional[str] = None
-    status: Optional[str] = None
+    urgency_level: Optional[str] = None
+    specific_requirements: Optional[str] = None
+    caregiver_notes: Optional[str] = None
+    status: Optional[str] = None  # Restricted transitions handled in logic
     
-    @field_validator('specific_needs')
+    @field_validator('specific_needs', 'specific_requirements', 'caregiver_notes')
     @classmethod
-    def validate_specific_needs_field(cls, v):
+    def validate_text_fields(cls, v):
         if v:
             return sanitize_string(v, max_length=1000)
         return v
@@ -225,12 +231,61 @@ class BookingResponse(BaseModel):
     recurring_pattern: Optional[Dict[str, Any]] = None
     is_recurring: bool
     status: str
+    urgency_level: Optional[str] = "medium"
+    specific_requirements: Optional[str] = None
+    caregiver_notes: Optional[str] = None
+    rejection_reason: Optional[str] = None
+    cancellation_reason: Optional[str] = None
     accepted_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    created_at: datetime
+    caregiver: Optional[UserBase] = None
+    care_recipient: Optional[UserBase] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class BookingHistoryResponse(BaseModel):
+    id: UUID
+    booking_id: UUID
+    previous_status: Optional[str]
+    new_status: str
+    changed_by: Optional[UUID]
+    reason: Optional[str]
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class BookingNoteCreate(BaseModel):
+    note: str = Field(..., min_length=1)
+    is_private: bool = False
+
+    @field_validator('note')
+    @classmethod
+    def validate_note(cls, v):
+        return sanitize_string(v, max_length=2000)
+
+
+class BookingNoteResponse(BaseModel):
+    id: UUID
+    booking_id: UUID
+    user_id: Optional[UUID]
+    note: str
+    is_private: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class BookingStatusUpdate(BaseModel):
+    status: str = Field(..., pattern="^(accepted|rejected|confirmed|in_progress|completed|cancelled)$")
+    reason: Optional[str] = None
+
 
 
 # Location Schemas

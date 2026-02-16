@@ -4,7 +4,8 @@ from typing import Optional
 from app.schemas import (
     BookingCreate, BookingUpdate, BookingResponse,
     VideoCallRequestCreate, VideoCallRequestResponse, VideoCallAcceptRequest,
-    ChatSessionResponse, ChatAcceptRequest
+    ChatSessionResponse, ChatAcceptRequest,
+    BookingStatusUpdate, BookingHistoryResponse, BookingNoteCreate, BookingNoteResponse
 )
 from app.database import supabase, supabase_admin
 from app.dependencies import get_current_user, verify_care_recipient, verify_caregiver
@@ -716,630 +717,409 @@ async def enable_chat_session(
         )
 
 
+async def _log_booking_history(booking_id: str, old_status: Optional[str], new_status: str, changed_by: str, reason: Optional[str] = None):
+    """Helper to log status changes to booking_history"""
+    try:
+        history_data = {
+            "booking_id": booking_id,
+            "previous_status": old_status,
+            "new_status": new_status,
+            "changed_by": changed_by,
+            "reason": reason
+        }
+        supabase_admin.table("booking_history").insert(history_data).execute()
+    except Exception as e:
+        print(f"[WARN] Failed to log booking history: {e}", flush=True)
+
+
+
+# --- HELPER ---
+async def _log_booking_history(booking_id: str, old_status: str | None, new_status: str, changed_by: str, reason: str | None = None):
+    """Helper to log status changes to booking_history"""
+    try:
+        history_data = {
+            "booking_id": booking_id,
+            "previous_status": old_status,
+            "new_status": new_status,
+            "changed_by": changed_by,
+            "reason": reason
+        }
+        supabase_admin.table("booking_history").insert(history_data).execute()
+    except Exception as e:
+        print(f"[WARN] Failed to log booking history: {e}", flush=True)
+
+
 @router.post("", response_model=BookingResponse, status_code=status.HTTP_201_CREATED)
 async def create_booking(
     booking_data: BookingCreate,
     current_user: dict = Depends(verify_care_recipient)
 ):
     """
-    Create a booking. If caregiver_id is provided and video call was completed,
-    create booking with that caregiver assigned.
+    Create a booking.
+    - Validates caregiver availability.
+    - Prevents double booking.
+    - Supports initial status 'draft' or 'requested'.
     """
+    print(f"[INFO] Creating booking for user {current_user.get('id')}", flush=True)
     try:
+        user_id = current_user.get("id")
         booking_dict = booking_data.model_dump(exclude_unset=True)
         
-        # Convert datetime objects to ISO format strings for Supabase
+        # 1. Format Data
         if "scheduled_date" in booking_dict and isinstance(booking_dict["scheduled_date"], datetime):
             booking_dict["scheduled_date"] = booking_dict["scheduled_date"].isoformat()
         
-        # Convert UUID objects to strings for Supabase
+        # Ensure UUIDs are strings
         from uuid import UUID
         for key, value in booking_dict.items():
             if isinstance(value, UUID):
                 booking_dict[key] = str(value)
         
-        # Ensure user_id is a string
-        user_id = current_user.get("id") if isinstance(current_user, dict) else str(current_user.get("id", ""))
-        booking_dict["care_recipient_id"] = str(user_id) if user_id else user_id
-        booking_dict["status"] = "pending"
+        booking_dict["care_recipient_id"] = str(user_id)
         
-        # If caregiver_id is provided, verify they accepted the video call
-        if booking_data.caregiver_id:
-            # Check if there's an accepted video call request
-            video_call_check = supabase.table("video_call_requests").select("*").eq("care_recipient_id", current_user["id"]).eq("caregiver_id", str(booking_data.caregiver_id)).eq("status", "accepted").order("created_at", desc=True).limit(1).execute()
+        # Default status for creation is 'requested' unless specified as 'draft'
+        initial_status = booking_dict.get("status", "requested")
+        booking_dict["status"] = initial_status
+
+        caregiver_id = booking_dict.get("caregiver_id")
+
+        # 2. Availability & Double Booking Check (Only if not draft)
+        if initial_status == "requested" and caregiver_id:
+            # Check if caregiver exists and is active
+            cg_check = supabase.table("users").select("id, is_active").eq("id", caregiver_id).eq("role", "caregiver").execute()
+            if not cg_check.data or not cg_check.data[0]["is_active"]:
+                 raise ValidationError("Caregiver is not available or inactive.")
+
+            # Check for overlapping bookings for this caregiver
+            # Fetch bookings for this caregiver on the same day (+/- 24 hrs)
+            scheduled_time = booking_data.scheduled_date
+            duration_hours = booking_data.duration_hours
             
-            if video_call_check.data:
-                booking_dict["video_call_request_id"] = video_call_check.data[0]["id"]
+            day_start = scheduled_time - timedelta(days=1)
+            day_end = scheduled_time + timedelta(days=1)
+            
+            existing_bookings = supabase_admin.table("bookings").select("scheduled_date, duration_hours").eq("caregiver_id", caregiver_id).in_("status", ["accepted", "confirmed", "in_progress"]).gte("scheduled_date", day_start.isoformat()).lte("scheduled_date", day_end.isoformat()).execute()
+            
+            req_start = scheduled_time
+            req_end = req_start + timedelta(hours=duration_hours)
+            
+            for b in existing_bookings.data:
+                # Naive datetime handling - assuming UTC or matching naive
+                b_start_str = b["scheduled_date"].replace('Z', '+00:00')
+                b_start = datetime.fromisoformat(b_start_str)
+                b_end = b_start + timedelta(hours=b["duration_hours"])
                 
-                # Check if chat session exists and is enabled
-                chat_check = supabase.table("chat_sessions").select("*").eq("care_recipient_id", current_user["id"]).eq("caregiver_id", str(booking_data.caregiver_id)).eq("is_enabled", True).limit(1).execute()
+                # Check overlap
+                if req_start < b_end and req_end > b_start:
+                    raise ConflictError("Caregiver is already booked for this time slot.")
+
+        # 3. Link Video Call / Chat if applicable
+        if caregiver_id:
+            try:
+                # Check accepted video call
+                video_call_check = supabase.table("video_call_requests").select("*").eq("care_recipient_id", user_id).eq("caregiver_id", caregiver_id).eq("status", "accepted").order("created_at", desc=True).limit(1).execute()
+                if video_call_check.data:
+                    booking_dict["video_call_request_id"] = video_call_check.data[0]["id"]
                 
+                # Check enabled chat session
+                chat_check = supabase.table("chat_sessions").select("*").eq("care_recipient_id", user_id).eq("caregiver_id", caregiver_id).eq("is_enabled", True).limit(1).execute()
                 if chat_check.data:
                     booking_dict["chat_session_id"] = chat_check.data[0]["id"]
-        
+            except Exception as e:
+                print(f"[WARN] Error validation video/chat linkage: {e}")
+
+        # 4. Insert Booking
+        print(f"[INFO] Inserting booking: {booking_dict}", flush=True)
         response = supabase.table("bookings").insert(booking_dict).execute()
         
         if not response.data:
             raise DatabaseError("Failed to create booking")
         
         booking = response.data[0]
-        
-        # If caregiver is assigned, mark them as unavailable and notify them
-        if booking.get("caregiver_id"):
-            caregiver_id_str = str(booking["caregiver_id"])
-            booking_id_str = str(booking["id"])
-            
-            # Mark caregiver as unavailable (they are now assigned to this booking)
-            # Create profile if it doesn't exist
-            try:
-                profile_check = supabase_admin.table("caregiver_profile").select("id").eq("user_id", caregiver_id_str).execute()
-                if profile_check.data and len(profile_check.data) > 0:
-                    # Profile exists, update availability
-                    supabase_admin.table("caregiver_profile").update({
-                        "availability_status": "unavailable"
-                    }).eq("user_id", caregiver_id_str).execute()
-                else:
-                    # Profile doesn't exist, create it with unavailable status
-                    supabase_admin.table("caregiver_profile").insert({
-                        "user_id": caregiver_id_str,
-                        "availability_status": "unavailable"
-                    }).execute()
-            except Exception as avail_error:
-                import traceback
-                print(f"[WARN] Error updating caregiver availability: {avail_error}", flush=True)
-                traceback.print_exc()
-            
-            # Get care recipient name and send notification
-            # Do this separately so notification is sent even if availability update fails
-            care_recipient_name = "A care recipient"
+        booking_id = booking["id"]
+
+        # 5. Log History
+        await _log_booking_history(booking_id, None, initial_status, str(user_id), "Initial booking creation")
+
+        # 6. Post-Creation Actions (Notifications, Availability)
+        if initial_status == "requested" and caregiver_id:
+             # Notify Caregiver
             try:
                 care_recipient_response = supabase_admin.table("users").select("full_name").eq("id", user_id).execute()
-                if care_recipient_response.data:
-                    care_recipient_name = care_recipient_response.data[0].get("full_name", "A care recipient")
-            except Exception as name_error:
-                import traceback
-                print(f"[WARN] Error getting care recipient name: {name_error}", flush=True)
-                traceback.print_exc()
-            
-            # Send notification - ensure it's sent even if name lookup fails
-            print(f"\n📬 SENDING BOOKING NOTIFICATION", flush=True)
-            print(f"   Caregiver ID: {caregiver_id_str}", flush=True)
-            print(f"   Booking ID: {booking_id_str}", flush=True)
-            print(f"   Care Recipient Name: {care_recipient_name}", flush=True)
-            
-            try:
-                notification_result = await notify_booking_created(
-                    caregiver_id=caregiver_id_str,
+                care_recipient_name = care_recipient_response.data[0].get("full_name", "A care recipient") if care_recipient_response.data else "A care recipient"
+                
+                await notify_booking_created(
+                    caregiver_id=caregiver_id,
                     care_recipient_name=care_recipient_name,
-                    booking_id=booking_id_str
+                    booking_id=booking_id
                 )
-                if notification_result:
-                    print(f"[INFO] Notification successfully sent to caregiver {caregiver_id_str} for booking {booking_id_str}", flush=True)
-                else:
-                    print(f"[WARN] Notification creation returned None for caregiver {caregiver_id_str}", flush=True)
-            except Exception as notif_error:
-                import traceback
-                print(f"[ERROR] CRITICAL: Error sending notification to caregiver: {notif_error}", flush=True)
-                traceback.print_exc()
-                # Try to create notification directly as fallback
-                try:
-                    direct_notif = supabase_admin.table("notifications").insert({
-                        "user_id": caregiver_id_str,
-                        "type": "booking",
-                        "title": "New Booking Request",
-                        "body": f"{care_recipient_name} has created a new booking request",
-                        "is_read": False,
-                        "data": {
-                            "booking_id": booking_id_str,
-                            "action": "view_booking"
-                        }
-                    }).execute()
-                    if direct_notif.data:
-                        print(f"[INFO] Fallback: Notification created directly in database", flush=True)
-                    else:
-                        print(f"[ERROR] Fallback: Failed to create notification directly", flush=True)
-                except Exception as fallback_error:
-                    print(f"[ERROR] Fallback notification creation also failed: {fallback_error}", flush=True)
-        
-        return booking
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
-
-
-@router.get("/{booking_id}", response_model=BookingResponse)
-async def get_booking(
-    booking_id: str,
-    current_user: dict = Depends(get_current_user)
-):
-    """Get booking details"""
-    try:
-        response = supabase.table("bookings").select("*").eq("id", booking_id).execute()
-        
-        if not response.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Booking not found"
-            )
-        
-        booking = response.data[0]
-        
-        # Verify user has access
-        if booking["care_recipient_id"] != current_user["id"] and booking.get("caregiver_id") != current_user["id"]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied"
-            )
-        
-        return booking
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
-
-
-@router.patch("/video-call/{video_call_id}/status")
-async def update_video_call_status(
-    video_call_id: str,
-    status_update: dict,
-    current_user: dict = Depends(get_current_user)
-):
-    """
-    Update video call status (e.g., to in_progress, completed).
-    Only caregiver or care recipient can update.
-    """
-    print(f"[INFO] Updating video call {video_call_id} status to: {status_update.get('status')}", flush=True)
-    try:
-        # Get video call request
-        response = supabase_admin.table("video_call_requests").select("*").eq("id", video_call_id).execute()
-        
-        if not response.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Video call request not found"
-            )
-        
-        video_call = response.data[0]
-        
-        # Verify user has access
-        if video_call["care_recipient_id"] != current_user["id"] and video_call["caregiver_id"] != current_user["id"]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied"
-            )
-        
-        # Validate status
-        new_status = status_update.get("status")
-        valid_statuses = ["pending", "accepted", "in_progress", "completed", "declined", "cancelled"]
-        if new_status not in valid_statuses:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}"
-            )
-        
-        # Update status
-        update_data = {"status": new_status}
-        if new_status == "completed":
-            update_data["completed_at"] = datetime.utcnow().isoformat()
-        
-        update_response = supabase_admin.table("video_call_requests").update(update_data).eq("id", video_call_id).execute()
-        
-        if not update_response.data:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to update video call status"
-            )
-        
-        print(f"[INFO] Video call {video_call_id} status updated to: {new_status}", flush=True)
-        return update_response.data[0]
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"[ERROR] Error updating video call status: {str(e)}", flush=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
-
-
-
-
-@router.post("/{booking_id}/complete-payment")
-async def complete_payment(
-    booking_id: str,
-    current_user: dict = Depends(get_current_user)
-):
-    """Complete payment for a booking and enable chat session"""
-    try:
-        # Get booking to verify access
-        booking_response = supabase_admin.table("bookings").select("*").eq("id", booking_id).execute()
-        
-        if not booking_response.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Booking not found"
-            )
-        
-        booking = booking_response.data[0]
-        
-        # Verify user is the care recipient
-        if booking["care_recipient_id"] != current_user["id"]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only care recipient can complete payment"
-            )
-        
-        # Update booking status to accepted (payment completed)
-        update_data = {
-            "status": "accepted",
-            "accepted_at": datetime.now(timezone.utc).isoformat()
-        }
-        
-        booking_update_response = supabase_admin.table("bookings").update(update_data).eq("id", booking_id).execute()
-        
-        if not booking_update_response.data:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to update booking"
-            )
-        
-        updated_booking = booking_update_response.data[0]
-        
-        # Enable chat session and mark caregiver as unavailable if caregiver is assigned
-        if updated_booking.get("caregiver_id"):
-            caregiver_id_str = str(updated_booking["caregiver_id"])
-            
-            # Mark caregiver as unavailable (they are now assigned to this booking)
-            # Create profile if it doesn't exist
-            try:
-                profile_check = supabase_admin.table("caregiver_profile").select("id").eq("user_id", caregiver_id_str).execute()
-                if profile_check.data and len(profile_check.data) > 0:
-                    # Profile exists, update availability
-                    supabase_admin.table("caregiver_profile").update({
-                        "availability_status": "unavailable"
-                    }).eq("user_id", caregiver_id_str).execute()
-                else:
-                    # Profile doesn't exist, create it with unavailable status
-                    supabase_admin.table("caregiver_profile").insert({
-                        "user_id": caregiver_id_str,
-                        "availability_status": "unavailable"
-                    }).execute()
-            except Exception as avail_error:
-                import traceback
-                print(f"Error updating caregiver availability: {avail_error}")
-                traceback.print_exc()
-            
-            # Check if chat session exists
-            chat_check = supabase_admin.table("chat_sessions").select("*").eq("care_recipient_id", booking["care_recipient_id"]).eq("caregiver_id", updated_booking["caregiver_id"]).execute()
-            
-            chat_session_id = None
-            if chat_check.data and len(chat_check.data) > 0:
-                # Update existing chat session
-                chat_session_id = chat_check.data[0]["id"]
-                supabase_admin.table("chat_sessions").update({
-                    "is_enabled": True,
-                    "care_recipient_accepted": True,
-                    "caregiver_accepted": True,
-                    "enabled_at": datetime.now(timezone.utc).isoformat()
-                }).eq("id", chat_session_id).execute()
-            else:
-                # Create new chat session
-                new_chat = supabase_admin.table("chat_sessions").insert({
-                    "care_recipient_id": booking["care_recipient_id"],
-                    "caregiver_id": updated_booking["caregiver_id"],
-                    "is_enabled": True,
-                    "care_recipient_accepted": True,
-                    "caregiver_accepted": True,
-                    "enabled_at": datetime.now(timezone.utc).isoformat()
-                }).execute()
-                if new_chat.data:
-                    chat_session_id = new_chat.data[0]["id"]
-            
-            # Update booking with chat_session_id if not already set
-            if chat_session_id and not updated_booking.get("chat_session_id"):
-                supabase_admin.table("bookings").update({
-                    "chat_session_id": chat_session_id
-                }).eq("id", booking_id).execute()
-            
-            # Notify both parties that chat is enabled
-            try:
-                care_recipient_response = supabase_admin.table("users").select("full_name").eq("id", booking["care_recipient_id"]).execute()
-                caregiver_response = supabase_admin.table("users").select("full_name").eq("id", updated_booking["caregiver_id"]).execute()
-                
-                care_recipient_name = care_recipient_response.data[0].get("full_name", "Care recipient") if care_recipient_response.data else "Care recipient"
-                caregiver_name = caregiver_response.data[0].get("full_name", "Caregiver") if caregiver_response.data else "Caregiver"
-                
-                await notify_chat_enabled(
-                    user_id=booking["care_recipient_id"],
-                    other_party_name=caregiver_name,
-                    chat_session_id=chat_session_id
-                )
-                await notify_chat_enabled(
-                    user_id=updated_booking["caregiver_id"],
-                    other_party_name=care_recipient_name,
-                    chat_session_id=chat_session_id
-                )
-            except Exception as notif_error:
-                print(f"Error sending chat enabled notification: {notif_error}")
-        
-        return {"message": "Payment completed and chat enabled", "booking": updated_booking}
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
-
-
-@router.post("/{booking_id}/complete")
-async def complete_booking(
-    booking_id: str,
-    current_user: dict = Depends(get_current_user)
-):
-    """Mark booking as completed by care recipient and make caregiver available again"""
-    print(f"[INFO] ===== COMPLETE BOOKING REQUEST STARTED =====", flush=True)
-    print(f"[INFO] Booking ID: {booking_id}", flush=True)
-    print(f"[INFO] Current User ID: {current_user.get('id')}", flush=True)
-    try:
-        # Get booking to verify access
-        print(f"[INFO] Fetching booking from database...", flush=True)
-        booking_response = supabase_admin.table("bookings").select("*").eq("id", booking_id).execute()
-        
-        if not booking_response.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Booking not found"
-            )
-        
-        booking = booking_response.data[0]
-        print(f"[INFO] Booking found: ID={booking.get('id')}, Status={booking.get('status')}, Caregiver ID={booking.get('caregiver_id')}", flush=True)
-        
-        # Verify user is the care recipient
-        if booking["care_recipient_id"] != current_user["id"]:
-            print(f"[ERROR] Permission denied: booking care_recipient_id={booking['care_recipient_id']} != current_user id={current_user['id']}", flush=True)
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only care recipient can mark booking as completed"
-            )
-        
-        print(f"[INFO] Permission verified. Updating booking status to 'completed'...", flush=True)
-        # Update booking status to completed
-        update_data = {
-            "status": "completed",
-            "completed_at": datetime.now(timezone.utc).isoformat()
-        }
-        
-        response = supabase_admin.table("bookings").update(update_data).eq("id", booking_id).execute()
-        print(f"[INFO] Booking status updated successfully", flush=True)
-        
-        if not response.data:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to update booking"
-            )
-        
-        updated_booking = response.data[0]
-        print(f"[INFO] Updated booking retrieved. Caregiver ID: {updated_booking.get('caregiver_id')}", flush=True)
-        
-        # Notify caregiver that booking was completed by care recipient
-        if updated_booking.get("caregiver_id"):
-            try:
-                care_recipient_response = supabase_admin.table("users").select("full_name").eq("id", current_user["id"]).execute()
-                care_recipient_name = care_recipient_response.data[0].get("full_name", "Care recipient") if care_recipient_response.data else "Care recipient"
-                
-                await notify_booking_status_change(
-                    user_id=str(updated_booking["caregiver_id"]),
-                    booking_id=booking_id,
-                    status="completed",
-                    other_party_name=care_recipient_name
-                )
-                print(f"[INFO] Booking completion notification sent to caregiver", flush=True)
-            except Exception as notif_error:
-                print(f"[WARN] Error sending completion notification to caregiver: {notif_error}", flush=True)
-        
-        # Mark caregiver as available again if they have no other active bookings or video calls
-        if updated_booking.get("caregiver_id"):
-            print(f"[INFO] Processing caregiver availability for caregiver_id: {updated_booking.get('caregiver_id')}", flush=True)
-            try:
-                caregiver_id = updated_booking["caregiver_id"]
-                
-                # Check if caregiver has any other active bookings (pending, accepted, or in_progress)
-                # Exclude the current booking that was just completed
-                active_bookings = supabase_admin.table("bookings").select("id").eq("caregiver_id", caregiver_id).neq("id", booking_id).in_("status", ["pending", "accepted", "in_progress"]).execute()
-                
-                # Check if caregiver has any active (non-completed) video calls
-                # Get all accepted video calls
-                all_video_calls = supabase_admin.table("video_call_requests").select("id, status, completed_at").eq("caregiver_id", caregiver_id).eq("care_recipient_accepted", True).eq("caregiver_accepted", True).eq("status", "accepted").execute()
-                
-                # Filter to only count active (non-completed) video calls
-                active_video_calls_count = 0
-                if all_video_calls.data:
-                    for vc in all_video_calls.data:
-                        # Skip if video call is completed
-                        if vc.get("completed_at") or vc.get("status") == "completed":
-                            continue
-                        # Check if related booking is completed
-                        video_call_id = vc.get("id")
-                        if video_call_id:
-                            try:
-                                related_booking = supabase_admin.table("bookings").select("id, status").eq("video_call_request_id", video_call_id).execute()
-                                if related_booking.data:
-                                    all_completed = all(booking.get("status") == "completed" for booking in related_booking.data)
-                                    if all_completed:
-                                        continue  # All related bookings are completed, skip this video call
-                            except:
-                                pass
-                        # This video call is still active
-                        active_video_calls_count += 1
-                
-                # If no active bookings AND no active video calls, mark caregiver as available
-                has_active_bookings = active_bookings.data and len(active_bookings.data) > 0
-                has_active_video_calls = active_video_calls_count > 0
-                
-                if not has_active_bookings and not has_active_video_calls:
-                    print(f"[INFO] No active bookings or video calls for caregiver {caregiver_id}, marking as available", flush=True)
-                    try:
-                        profile_check = supabase_admin.table("caregiver_profile").select("id, availability_status").eq("user_id", caregiver_id).execute()
-                        print(f"[INFO] Profile check result: {profile_check.data}", flush=True)
-                        if profile_check.data and len(profile_check.data) > 0:
-                            print(f"[INFO] Updating existing profile for caregiver {caregiver_id}", flush=True)
-                            update_result = supabase_admin.table("caregiver_profile").update({
-                                "availability_status": "available"
-                            }).eq("user_id", caregiver_id).execute()
-                            print(f"[INFO] Caregiver {caregiver_id} marked as available. Profile updated: {update_result.data}", flush=True)
-                            # Verify the update
-                            verify_result = supabase_admin.table("caregiver_profile").select("availability_status").eq("user_id", caregiver_id).execute()
-                            print(f"[INFO] Verification: Caregiver {caregiver_id} availability_status is now: {verify_result.data[0].get('availability_status') if verify_result.data else 'NOT FOUND'}", flush=True)
-                        else:
-                            # Create profile if it doesn't exist
-                            print(f"[INFO] Creating new profile for caregiver {caregiver_id}", flush=True)
-                            insert_result = supabase_admin.table("caregiver_profile").insert({
-                                "user_id": caregiver_id,
-                                "availability_status": "available"
-                            }).execute()
-                            print(f"[INFO] Created caregiver profile for {caregiver_id} with available status. Profile created: {insert_result.data}", flush=True)
-                    except Exception as profile_error:
-                        print(f"[ERROR] Error updating caregiver profile: {profile_error}", flush=True)
-                        import traceback
-                        traceback.print_exc()
-                else:
-                    print(f"[WARN] Caregiver {caregiver_id} still has {len(active_bookings.data) if active_bookings.data else 0} active bookings and {active_video_calls_count} active video calls, keeping current availability status", flush=True)
-            except Exception as avail_error:
-                print(f"[ERROR] Error updating caregiver availability: {avail_error}", flush=True)
-                import traceback
-                traceback.print_exc()
-        else:
-            print(f"[WARN] No caregiver_id found in booking, skipping availability update", flush=True)
-        
-        print(f"[INFO] ===== COMPLETE BOOKING REQUEST SUCCESSFUL =====", flush=True)
-        return {"message": "Booking marked as completed", "booking": updated_booking}
-    
-    except HTTPException as http_ex:
-        print(f"[ERROR] HTTPException in complete_booking: {http_ex.status_code} - {http_ex.detail}", flush=True)
-        raise
-    except Exception as e:
-        print(f"[ERROR] Exception in complete_booking: {e}", flush=True)
-        import traceback
-        print(traceback.format_exc(), flush=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
-
-
-@router.patch("/{booking_id}", response_model=BookingResponse)
-async def update_booking(
-    booking_id: str,
-    booking_update: BookingUpdate,
-    current_user: dict = Depends(get_current_user)
-):
-    """Update booking"""
-    try:
-        # Get booking to verify access
-        booking_response = supabase.table("bookings").select("*").eq("id", booking_id).execute()
-        
-        if not booking_response.data:
-            raise NotFoundError("Booking not found")
-        
-        booking = booking_response.data[0]
-        
-        # Verify user has access
-        if booking["care_recipient_id"] != current_user["id"] and booking.get("caregiver_id") != current_user["id"]:
-            raise AuthorizationError("Access denied")
-        
-        update_data = booking_update.model_dump(exclude_unset=True)
-        
-        if not update_data:
-            raise ValidationError("No fields to update")
-            
-        # State transition validation
-        current_status = booking.get("status")
-        new_status = update_data.get("status")
-        
-        # 1. Prevent updates to terminal states
-        if current_status in ["completed", "cancelled", "declined"]:
-            if new_status and new_status != current_status:
-                raise ConflictError(f"Cannot change status of a {current_status} booking")
-            if not new_status: # Trying to update other fields
-                raise ConflictError(f"Cannot update details of a {current_status} booking")
-                
-        # 2. Validate interactions
-        if new_status:
-            # Simple state machine validation
-            if current_status == "pending" and new_status not in ["accepted", "cancelled", "declined"]:
-                raise ValidationError(f"Invalid status transition from '{current_status}' to '{new_status}'")
-            if current_status == "accepted" and new_status not in ["in_progress", "completed", "cancelled"]:
-                raise ValidationError(f"Invalid status transition from '{current_status}' to '{new_status}'")
-        
-        if "status" in update_data and update_data["status"] == "accepted":
-            update_data["accepted_at"] = datetime.now(timezone.utc).isoformat()
-        
-        response = supabase.table("bookings").update(update_data).eq("id", booking_id).execute()
-        
-        if not response.data:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to update booking"
-            )
-        
-        updated_booking = response.data[0]
-        
-        # Send notification if status changed
-        if "status" in update_data:
-            try:
-                new_status = update_data["status"]
-                print(f"[INFO] Booking {booking_id} status updated to {new_status}. Sending notification...", flush=True)
-                
-                # Determine who to notify
-                other_party_id = None
-                
-                # Careful with string/uuid comparison
-                current_user_id = str(current_user["id"])
-                care_recipient_id = str(updated_booking["care_recipient_id"])
-                caregiver_id = str(updated_booking.get("caregiver_id")) if updated_booking.get("caregiver_id") else None
-                
-                if current_user_id == care_recipient_id:
-                    # Current user is Care Recipient -> Notify Caregiver
-                    other_party_id = caregiver_id
-                elif current_user_id == caregiver_id:
-                    # Current user is Caregiver -> Notify Care Recipient
-                    other_party_id = care_recipient_id
-                
-                if other_party_id:
-                    # Get name of the person triggering the action (current_user)
-                    trigger_user_name = "User"
-                    try:
-                        user_info = supabase_admin.table("users").select("full_name").eq("id", current_user_id).execute()
-                        if user_info.data:
-                            trigger_user_name = user_info.data[0].get("full_name", "User")
-                    except Exception as e:
-                        print(f"[WARN] Failed to fetch user name: {e}", flush=True)
-
-                    await notify_booking_status_change(
-                        user_id=other_party_id,
-                        booking_id=booking_id,
-                        status=new_status,
-                        other_party_name=trigger_user_name
-                    )
-                    print(f"[INFO] Notification sent to {other_party_id}", flush=True)
             except Exception as e:
-                print(f"[ERROR] Failed to send booking update notification: {e}", flush=True)
-                # Don't fail the request, just log error
-        
-        return updated_booking
-    
+                 print(f"[WARN] Failed to send notification: {e}", flush=True)
+                 import traceback
+                 traceback.print_exc()
+
+        return booking
+
     except HTTPException:
         raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise DatabaseError(f"Error creating booking: {str(e)}")
+
+
+@router.post("/{booking_id}/respond", response_model=BookingResponse)
+async def respond_to_booking(
+    booking_id: str,
+    response_data: BookingStatusUpdate,
+    current_user: dict = Depends(verify_caregiver)
+):
+    """
+    Caregiver accepts or rejects a booking request.
+    - Transitions: requested -> accepted OR rejected
+    """
+    try:
+        user_id = current_user.get("id")
+        
+        res = supabase.table("bookings").select("*").eq("id", booking_id).execute()
+        if not res.data:
+            raise NotFoundError("Booking not found")
+        booking = res.data[0]
+        
+        if booking["caregiver_id"] != user_id:
+            raise AuthorizationError("You are not assigned to this booking")
+            
+        if booking["status"] != "requested":
+            raise ConflictError(f"Cannot respond to booking in '{booking['status']}' state. Only 'requested' bookings can be accepted/rejected.")
+            
+        new_status = response_data.status
+        if new_status not in ["accepted", "rejected"]:
+             raise ValidationError("Response status must be 'accepted' or 'rejected'")
+             
+        update_data = {
+            "status": new_status,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+        
+        if new_status == "accepted":
+            update_data["accepted_at"] = datetime.now(timezone.utc).isoformat()
+        elif new_status == "rejected":
+            update_data["rejection_reason"] = response_data.reason
+
+        updated_res = supabase_admin.table("bookings").update(update_data).eq("id", booking_id).execute()
+        if not updated_res.data:
+            raise DatabaseError("Failed to update booking")
+            
+        updated_booking = updated_res.data[0]
+        
+        await _log_booking_history(booking_id, booking["status"], new_status, user_id, response_data.reason)
+        
+        # Notify Care Recipient
+        try:
+            caregiver_name = current_user.get("full_name", "Caregiver")
+            await notify_booking_status_change(
+                user_id=booking["care_recipient_id"],
+                booking_id=booking_id,
+                status=new_status,
+                other_party_name=caregiver_name
+            )
+        except Exception as e:
+            print(f"[WARN] Failed to notify status change: {e}", flush=True)
+
+        return updated_booking
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise DatabaseError(f"Error responding to booking: {str(e)}")
+
+
+@router.patch("/{booking_id}/status", response_model=BookingResponse)
+async def update_booking_status(
+    booking_id: str,
+    status_update: BookingStatusUpdate,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Update booking status (Start, Complete, Cancel).
+    - Enforces state transitions.
+    """
+    try:
+        user_id = current_user.get("id")
+        user_role = current_user.get("role")
+        
+        res = supabase.table("bookings").select("*").eq("id", booking_id).execute()
+        if not res.data:
+            raise NotFoundError("Booking not found")
+        booking = res.data[0]
+        
+        if booking["caregiver_id"] != user_id and booking["care_recipient_id"] != user_id:
+             raise AuthorizationError("Access denied")
+             
+        current_status = booking["status"]
+        new_status = status_update.status
+        
+        allowed = False
+        
+        if new_status == "in_progress":
+            if user_role != "caregiver":
+                raise AuthorizationError("Only caregivers can start a service")
+            if current_status == "confirmed":
+                allowed = True
+            else:
+                raise ConflictError("Booking must be 'confirmed' (paid) before starting.")
+                
+        elif new_status == "completed":
+            if user_role != "caregiver":
+                raise AuthorizationError("Only caregivers can complete a service")
+            if current_status == "in_progress":
+                allowed = True
+            else:
+                 raise ConflictError("Booking must be 'in_progress' before completion.")
+                 
+        elif new_status == "cancelled":
+            if current_status in ["completed", "cancelled"]:
+                raise ConflictError("Cannot cancel a completed or already cancelled booking.")
+            allowed = True
+            
+        elif new_status == "confirmed":
+             raise ConflictError("Confirmation should be done via payment.")
+        
+        else:
+             raise ValidationError(f"Invalid status transition to '{new_status}'")
+             
+        if not allowed:
+             raise ConflictError(f"Transition from '{current_status}' to '{new_status}' is not allowed.")
+             
+        update_data = {
+            "status": new_status,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+        
+        if new_status == "completed":
+            update_data["completed_at"] = datetime.now(timezone.utc).isoformat()
+        if new_status == "cancelled":
+            update_data["cancellation_reason"] = status_update.reason
+            
+        updated_res = supabase_admin.table("bookings").update(update_data).eq("id", booking_id).execute()
+        updated_booking = updated_res.data[0]
+        
+        await _log_booking_history(booking_id, current_status, new_status, user_id, status_update.reason)
+        
+        try:
+            other_id = booking["care_recipient_id"] if user_role == "caregiver" else booking["caregiver_id"]
+            if other_id:
+                my_name = current_user.get("full_name", "User")
+                await notify_booking_status_change(
+                    user_id=other_id,
+                    booking_id=booking_id,
+                    status=new_status,
+                    other_party_name=my_name
+                )
+        except Exception as e:
+             print(f"[WARN] Failed to notify: {e}", flush=True)
+
+        return updated_booking
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise DatabaseError(f"Error updating status: {str(e)}")
+
+
+@router.get("/{booking_id}/history", response_model=list[BookingHistoryResponse])
+async def get_booking_history(
+    booking_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get history of status changes"""
+    try:
+        booking = supabase.table("bookings").select("caregiver_id, care_recipient_id").eq("id", booking_id).execute()
+        if not booking.data:
+             raise NotFoundError("Booking not found")
+        b = booking.data[0]
+        if b["caregiver_id"] != current_user["id"] and b["care_recipient_id"] != current_user["id"]:
+             raise AuthorizationError("Access denied")
+             
+        res = supabase.table("booking_history").select("*").eq("booking_id", booking_id).order("created_at", desc=False).execute()
+        return res.data
     except Exception as e:
         raise DatabaseError(str(e))
+
+
+@router.post("/{booking_id}/notes", response_model=BookingNoteResponse)
+async def add_booking_note(
+    booking_id: str,
+    note: BookingNoteCreate,
+    current_user: dict = Depends(get_current_user)
+):
+    """Add a note to the booking"""
+    try:
+        booking = supabase.table("bookings").select("caregiver_id, care_recipient_id").eq("id", booking_id).execute()
+        if not booking.data:
+             raise NotFoundError("Booking not found")
+        b = booking.data[0]
+        if b["caregiver_id"] != current_user["id"] and b["care_recipient_id"] != current_user["id"]:
+             raise AuthorizationError("Access denied")
+             
+        data = {
+             "booking_id": booking_id,
+             "user_id": current_user["id"],
+             "note": note.note,
+             "is_private": note.is_private
+        }
+        res = supabase.table("booking_notes").insert(data).execute()
+        return res.data[0]
+    except Exception as e:
+        raise DatabaseError(str(e))
+
+@router.get("/{booking_id}", response_model=BookingResponse, status_code=status.HTTP_200_OK)
+async def get_booking_details(
+    booking_id: uuid.UUID,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get detailed information for a specific booking.
+    Accessible by:
+    - The care recipient who created it
+    - The caregiver assigned to it
+    """
+    try:
+        # Get user_id
+        user_id = current_user.get("id") if isinstance(current_user, dict) else str(current_user.get("id", ""))
+        
+        # Query booking with relations
+        # We need to join care_recipient and caregiver tables
+        # Supabase syntax for joins in python client:
+        # .select("*, care_recipient:users!care_recipient_id(*), caregiver:users!caregiver_id(*)")
+        
+        query = supabase.table("bookings").select(
+            "*, care_recipient:users!care_recipient_id(*), caregiver:users!caregiver_id(*)"
+        ).eq("id", str(booking_id))
+        
+        response = query.execute()
+        
+        if not response.data:
+            raise NotFoundError("Booking not found")
+            
+        booking = response.data[0]
+        
+        # Authorization Check
+        care_recipient_id = booking.get("care_recipient_id")
+        caregiver_id = booking.get("caregiver_id")
+        
+        # Check if user is either the recipient or the caregiver
+        # Also allow if user is an admin (future proofing, if we had admin role check)
+        is_authorized = (str(care_recipient_id) == str(user_id)) or \
+                        (str(caregiver_id) == str(user_id) if caregiver_id else False)
+                        
+        if not is_authorized:
+            raise AuthorizationError("You are not authorized to view this booking")
+            
+        return booking
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_error(e, {"booking_id": str(booking_id), "user_id": user_id})
+        raise DatabaseError(f"Error retrieving booking details: {str(e)}")

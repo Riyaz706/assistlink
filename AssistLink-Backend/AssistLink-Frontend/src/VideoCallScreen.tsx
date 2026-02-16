@@ -1,264 +1,284 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  StatusBar,
+  TouchableOpacity,
   ActivityIndicator,
-  Platform,
   Alert,
+  Platform,
+  Dimensions,
+  SafeAreaView
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { WebView } from 'react-native-webview';
+import {
+  TwilioVideoLocalView,
+  TwilioVideoParticipantView,
+  TwilioVideo
+} from 'react-native-twilio-video-webrtc';
+import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { api } from './api/client';
-import { useErrorHandler, isNetworkError, retryOperation } from './hooks/useErrorHandler';
+import { useAuth } from './context/AuthContext';
+
+const { width, height } = Dimensions.get('window');
 
 const VideoCallScreen = () => {
-  const navigation = useNavigation();
-  const route = useRoute();
-  const { callId, otherPartyName, videoCallUrl: initialUrl } = route.params as any;
+  const navigation = useNavigation<any>();
+  const route = useRoute<any>();
+  const { bookingId } = route.params;
+  const { user } = useAuth();
 
-  const [videoCallUrl, setVideoCallUrl] = useState<string | null>(initialUrl || null);
-  const [loading, setLoading] = useState(true);
-  const { error, handleError, clearError } = useErrorHandler();
+  const [token, setToken] = useState<string | null>(null);
+  const [status, setStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
+  const [isAudioEnabled, setIsAudioEnabled] = useState(true);
+  const [isVideoEnabled, setIsVideoEnabled] = useState(true);
+  const [isRearCamera, setIsRearCamera] = useState(false);
+  const [roomName, setRoomName] = useState<string>('');
+  const [videoTracks, setVideoTracks] = useState<Map<string, any>>(new Map());
+
+  const twilioRef = useRef<TwilioVideo>(null);
 
   useEffect(() => {
-    const fetchCallDetails = async () => {
-      // 1. Check Permissions
-      if (Platform.OS !== 'web') {
-        try {
-          const { Camera } = require('expo-camera');
-          const { Audio } = require('expo-av');
-
-          const cameraStatus = await Camera.requestCameraPermissionsAsync();
-          const audioStatus = await Audio.requestPermissionsAsync();
-
-          if (cameraStatus.status !== 'granted' || audioStatus.status !== 'granted') {
-            Alert.alert(
-              "Permissions Required",
-              "Camera and Microphone permissions are needed for video calls.",
-              [{ text: "Go Back", onPress: () => navigation.goBack() }]
-            );
-            setLoading(false);
-            return;
-          }
-        } catch (e) {
-          console.warn("Error requesting permissions", e);
-          // Continue anyway, maybe it works or user handled it
-        }
-      }
-
-      if (videoCallUrl) {
-        setLoading(false);
-        return;
-      }
-
-      // ... existing fetch logic ...
-      if (!callId) {
-        handleError(new Error('No call ID provided'), 'video-call-init');
-        setLoading(false);
-        return;
-      }
-
-      try {
-        // Use retry logic for fetching call details
-        const details = await retryOperation(
-          () => api.getVideoCallRequest(callId),
-          {
-            maxRetries: 2,
-            delayMs: 1000,
-            onRetry: (attempt) => {
-              console.log(`[VideoCallScreen] Retry attempt ${attempt} for fetching call details`);
-            }
-          }
-        ) as any;
-
-        if (details && details.video_call_url) {
-          let url = details.video_call_url;
-          // Fix for legacy/placeholder URLs in database
-          if (url.includes('video-call.assistlink.app')) {
-            const parts = url.split('/');
-            const id = parts[parts.length - 1]; // uuid
-            url = `https://meet.jit.si/assistlink-${id}`;
-          }
-          setVideoCallUrl(url);
-          clearError();
-        } else {
-          handleError(new Error('Video call URL not found'), 'video-call-fetch');
-        }
-      } catch (err: any) {
-        console.error('Failed to fetch video call details', err);
-        handleError(err, 'video-call-fetch');
-      } finally {
-        setLoading(false);
-      }
+    connectToRoom();
+    return () => {
+      disconnect();
     };
+  }, []);
 
-    fetchCallDetails();
-  }, [callId, videoCallUrl]);
+  const connectToRoom = async () => {
+    try {
+      setStatus('connecting');
+      const response = await api.getVideoToken(bookingId);
+      setToken(response.token);
+      setRoomName(response.room_name);
 
-  // Notify backend that user joined the call
-  useEffect(() => {
-    if (callId && !loading && videoCallUrl && !error) {
-      const joinCall = async () => {
-        try {
-          console.log('[VideoCallScreen] Joining call:', callId);
-          await api.joinVideoCall(callId);
-          console.log('[VideoCallScreen] Joined call notification sent');
-        } catch (err: any) {
-          console.error('[VideoCallScreen] Failed to send join notification', err);
-          // Don't show error to user - this is non-critical
-        }
-      };
-
-      joinCall();
+      twilioRef.current?.connect({
+        accessToken: response.token,
+        roomName: response.room_name
+      });
+    } catch (error: any) {
+      console.error("Failed to connect:", error);
+      Alert.alert("Connection Failed", error.message || "Could not join video call");
+      navigation.goBack();
     }
-  }, [callId, loading, videoCallUrl, error]);
+  };
 
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#059669" />
-        <Text style={styles.loadingText}>Connecting to video call...</Text>
-      </View>
-    );
-  }
+  const disconnect = () => {
+    twilioRef.current?.disconnect();
+    setStatus('disconnected');
+  };
 
-  if (error || !videoCallUrl) {
-    return (
-      <View style={styles.errorContainer}>
-        <Icon name="video-off" size={48} color="#EF4444" />
-        <Text style={styles.errorText}>{error?.message || 'Unable to connect to video call'}</Text>
-        <Text
-          style={styles.retryButton}
-          onPress={() => navigation.goBack()}
-        >
-          Go Back
-        </Text>
-      </View>
-    );
-  }
+  const handleEndCall = () => {
+    disconnect();
+    navigation.goBack();
+  };
+
+  const _onRoomDidConnect = () => {
+    setStatus('connected');
+    console.log("Connected to room:", roomName);
+  };
+
+  const _onRoomDidDisconnect = ({ error }: any) => {
+    console.log("Room disconnected:", error);
+    setStatus('disconnected');
+    if (error) {
+      Alert.alert("Disconnected", error);
+    }
+    navigation.goBack();
+  };
+
+  const _onRoomDidFailToConnect = (error: any) => {
+    console.log("Failed to connect:", error);
+    setStatus('disconnected');
+    Alert.alert("Connection Error", "Failed to connect to room.");
+    navigation.goBack();
+  };
+
+  const _onParticipantAddedVideoTrack = ({ participant, track }: any) => {
+    console.log("Participant added video track:", participant.identity, track);
+    setVideoTracks(new Map(videoTracks.set(participant.sid, { ...participant, trackId: track.trackId })));
+  };
+
+  const _onParticipantRemovedVideoTrack = ({ participant, track }: any) => {
+    console.log("Participant removed video track:", participant.identity, track);
+    const newVideoTracks = new Map(videoTracks);
+    newVideoTracks.delete(participant.sid);
+    setVideoTracks(newVideoTracks);
+  };
+
+  const toggleAudio = () => {
+    const newState = !isAudioEnabled;
+    setIsAudioEnabled(newState);
+    twilioRef.current?.setLocalAudioEnabled(newState);
+  };
+
+  const toggleVideo = () => {
+    const newState = !isVideoEnabled;
+    setIsVideoEnabled(newState);
+    twilioRef.current?.setLocalVideoEnabled(newState);
+  };
+
+  const flipCamera = () => {
+    twilioRef.current?.flipCamera();
+    setIsRearCamera(!isRearCamera);
+  };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
-      <StatusBar hidden />
-      {Platform.OS === 'web' ? (
-        <View style={styles.webContainer}>
-          <Text style={styles.webText}>Video calls are best experienced in a new tab on Web.</Text>
-          <Text
-            style={styles.openButton}
-            onPress={() => window.open(videoCallUrl!, '_blank')}
-          >
-            Open Video Call
-          </Text>
-          <Text
-            style={styles.retryButton}
-            onPress={() => navigation.goBack()}
-          >
-            Go Back
-          </Text>
-        </View>
-      ) : (
-        <WebView
-          source={{ uri: videoCallUrl! }}
-          style={styles.webview}
-          allowsInlineMediaPlayback
-          mediaPlaybackRequiresUserAction={false}
-          javaScriptEnabled
-          domStorageEnabled
-          startInLoadingState
-          renderLoading={() => (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#059669" />
-            </View>
-          )}
-          // Critical for Jitsi Meet to work
-          originWhitelist={['*']}
-          userAgent={
-            Platform.OS === 'android'
-              ? 'Mozilla/5.0 (Linux; Android 10; Android SDK built for x86) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36'
-              : undefined
-          }
-          onShouldStartLoadWithRequest={(request) => {
-            // Block attempts to open other apps via intent
-            if (request.url.startsWith('intent://') || request.url.startsWith('android-app://')) {
-              return false;
-            }
-            return true;
-          }}
+    <View style={styles.container}>
+      {/* Remote Video(s) */}
+      <View style={styles.remoteGrid}>
+        {Array.from(videoTracks, ([sid, trackDesc]) => (
+          <TwilioVideoParticipantView
+            style={styles.remoteVideo}
+            key={sid}
+            trackIdentifier={{
+              participantSid: sid,
+              videoTrackSid: trackDesc.trackId
+            }}
+          />
+        ))}
+        {videoTracks.size === 0 && status === 'connected' && (
+          <View style={styles.waitingContainer}>
+            <Text style={styles.waitingText}>Waiting for others to join...</Text>
+          </View>
+        )}
+      </View>
+
+      {/* Local Video */}
+      <View style={styles.localVideoContainer}>
+        <TwilioVideoLocalView
+          enabled={true}
+          style={styles.localVideo}
         />
+      </View>
+
+      {/* Controls */}
+      <SafeAreaView style={styles.controlsContainer}>
+        <TouchableOpacity
+          style={[styles.controlButton, !isAudioEnabled && styles.controlButtonDisabled]}
+          onPress={toggleAudio}
+        >
+          <Ionicons name={isAudioEnabled ? "mic" : "mic-off"} size={28} color="#FFF" />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.controlButton, styles.endCallButton]}
+          onPress={handleEndCall}
+        >
+          <Ionicons name="call" size={32} color="#FFF" />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.controlButton, !isVideoEnabled && styles.controlButtonDisabled]}
+          onPress={toggleVideo}
+        >
+          <Ionicons name={isVideoEnabled ? "videocam" : "videocam-off"} size={28} color="#FFF" />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.controlButton}
+          onPress={flipCamera}
+        >
+          <Ionicons name="camera-reverse" size={28} color="#FFF" />
+        </TouchableOpacity>
+      </SafeAreaView>
+
+      {/* Twilio Component (Invisible) */}
+      <TwilioVideo
+        ref={twilioRef}
+        onRoomDidConnect={_onRoomDidConnect}
+        onRoomDidDisconnect={_onRoomDidDisconnect}
+        onRoomDidFailToConnect={_onRoomDidFailToConnect}
+        onParticipantAddedVideoTrack={_onParticipantAddedVideoTrack}
+        onParticipantRemovedVideoTrack={_onParticipantRemovedVideoTrack}
+      />
+
+      {status === 'connecting' && (
+        <View style={styles.loader}>
+          <ActivityIndicator size="large" color="#FFF" />
+          <Text style={styles.loadingText}>Connecting...</Text>
+        </View>
       )}
-    </SafeAreaView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: '#000',
   },
-  webview: {
+  remoteGrid: {
     flex: 1,
-    backgroundColor: '#000000',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#1A1A1A',
+  remoteVideo: {
+    width: '100%',
+    height: '100%',
   },
-  loadingText: {
-    marginTop: 16,
-    color: '#FFFFFF',
-    fontSize: 16,
-  },
-  errorContainer: {
+  waitingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#1A1A1A',
-    padding: 20,
   },
-  errorText: {
-    color: '#FFFFFF',
+  waitingText: {
+    color: '#FFF',
     fontSize: 18,
-    marginTop: 12,
-    marginBottom: 24,
-    textAlign: 'center',
   },
-  retryButton: {
-    color: '#059669',
-    fontSize: 16,
-    fontWeight: 'bold',
-    padding: 10,
-  },
-  webContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#1A1A1A',
-    padding: 20,
-  },
-  webText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  openButton: {
-    backgroundColor: '#059669',
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
+  localVideoContainer: {
+    position: 'absolute',
+    bottom: 120, // Above controls
+    right: 20,
+    width: 100,
+    height: 150,
     borderRadius: 8,
     overflow: 'hidden',
-    marginBottom: 16,
-    textAlign: 'center',
+    borderWidth: 2,
+    borderColor: '#FFF',
+    zIndex: 10,
   },
+  localVideo: {
+    flex: 1,
+  },
+  controlsContainer: {
+    position: 'absolute',
+    bottom: 30,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-evenly',
+    alignItems: 'center',
+    zIndex: 20,
+  },
+  controlButton: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  controlButtonDisabled: {
+    backgroundColor: '#FF3B30',
+  },
+  endCallButton: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#FF3B30',
+  },
+  loader: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    zIndex: 30,
+  },
+  loadingText: {
+    color: '#FFF',
+    marginTop: 10,
+  }
 });
 
 export default VideoCallScreen;

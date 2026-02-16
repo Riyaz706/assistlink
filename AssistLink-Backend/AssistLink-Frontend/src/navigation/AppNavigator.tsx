@@ -37,6 +37,8 @@ import EditProfileScreen from '../EditProfileScreen';
 import ChangePasswordScreen from '../ChangePasswordScreen';
 import SettingsScreen from '../SettingsScreen';
 import HelpSupportScreen from '../HelpSupportScreen';
+import BookingsScreen from '../BookingsScreen';
+import BookingDetailScreen from '../BookingDetailScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -98,6 +100,8 @@ const AppNavigator = () => {
                     <Stack.Screen name="ChatDetailsScreen" component={ChatDetailsScreen} />
                     <Stack.Screen name="Settings" component={SettingsScreen} />
                     <Stack.Screen name="HelpSupport" component={HelpSupportScreen} />
+                    <Stack.Screen name="BookingsScreen" component={BookingsScreen} />
+                    <Stack.Screen name="BookingDetailScreen" component={BookingDetailScreen} />
                 </>
             )}
         </Stack.Navigator>

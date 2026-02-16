@@ -228,7 +228,11 @@ const MatchmakingScreen = ({ navigation }: any) => {
                 </Text>
                 <TouchableOpacity
                   style={styles.successDoneBtn}
-                  onPress={handleCloseSelection}
+                  onPress={() => {
+                    handleCloseSelection();
+                    // Navigate back to dashboard to see the new booking
+                    navigation.navigate('CareRecipientDashboard');
+                  }}
                 >
                   <Text style={styles.successDoneBtnText}>Done</Text>
                 </TouchableOpacity>
@@ -301,9 +305,10 @@ const MatchmakingScreen = ({ navigation }: any) => {
                             caregiver_id: selectedCaregiver.id,
                             service_type: serviceType,
                             scheduled_date: when.toISOString(),
-                            duration_hours: 2.0, // Defaulting for now as parsing logic is complex inside JSX
+                            duration_hours: 2.0, // Defaulting for now
                             location: bookingLocation,
-                            specific_needs: assistanceType // 'scribe' or 'reader' etc.
+                            specific_requirements: route.params?.specificRequirements || assistanceType, // Use specificRequirements
+                            urgency_level: route.params?.urgencyLevel || 'standard'
                           });
                         }
 

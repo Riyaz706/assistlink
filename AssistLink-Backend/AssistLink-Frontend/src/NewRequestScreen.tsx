@@ -146,6 +146,7 @@ const NewRequestScreen = ({ navigation }: any) => {
 
   const [selectedAssistance, setSelectedAssistance] = useState<string>('scribe');
   const [selectedUrgency, setSelectedUrgency] = useState<string | null>(null);
+  const [additionalNotes, setAdditionalNotes] = useState(''); // New State
 
   const [isPickerVisible, setPickerVisible] = useState(false);
   const [pickerStep, setPickerStep] = useState<'date' | 'startTime' | 'endTime'>('date');
@@ -299,7 +300,7 @@ const NewRequestScreen = ({ navigation }: any) => {
 
     // Build a simple payload to help filter caregivers and pre-fill booking
     const payload: any = {
-      serviceType: activeTab === 'exam' ? 'exam_assistance' : activeTab === 'daily' ? 'daily_care' : 'one_time',
+      serviceType: activeTab === 'exam' ? 'exam_assistance' : activeTab === 'daily' ? 'daily_care' : 'urgent_care', // Updated urgent key
       assistanceType: activeTab === 'exam' ? selectedAssistance : null,
       examDate: examDate,
       examStartTime: examStartTime,
@@ -311,6 +312,9 @@ const NewRequestScreen = ({ navigation }: any) => {
       dailyDuration: dailyDuration,
       locationText,
       location: selectedLocation, // Include coordinates
+      urgencyLevel: activeTab === 'urgent' ? 'high' : 'standard', // simple mapping
+      specificRequirements: activeTab === 'urgent' ? selectedUrgency : additionalNotes, // Map urgency type or notes
+      additionalNotes: additionalNotes // Pass raw notes too
     };
     navigation.navigate('MatchmakingScreen', payload);
   };

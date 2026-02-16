@@ -1,5 +1,7 @@
 {
-  "projects": {},
+  "projects": {
+    "default": "assistlink-67bb3-1a64d"
+  },
   "targets": {},
   "etags": {}
 }

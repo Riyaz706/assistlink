@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
-from app.routers import auth, users, caregivers, bookings, location, dashboard, chat, notifications, payments, google_auth, test, emergency
+from app.routers import auth, users, caregivers, bookings, location, dashboard, chat, notifications, payments, google_auth, test, emergency, communications
 from app.config import settings
 from src.config.db import get_db_connection, return_db_connection
 from app.error_handler import (
@@ -127,6 +127,7 @@ app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
 app.include_router(notifications.router, prefix="/api/notifications", tags=["Notifications"])
 app.include_router(payments.router, prefix="/api/payments", tags=["Payments"])
 app.include_router(emergency.router, prefix="/api/emergency", tags=["Emergency"])
+app.include_router(communications.router, prefix="/api/communications", tags=["Communications"])
 app.include_router(test.router, tags=["Test"])
 
 

@@ -30,8 +30,8 @@ class Settings(BaseSettings):
     # Twilio Video Configuration
     TWILIO_ACCOUNT_SID: Optional[str] = None
     TWILIO_AUTH_TOKEN: Optional[str] = None
-    TWILIO_API_KEY_SID: Optional[str] = None
-    TWILIO_API_KEY_SECRET: Optional[str] = None
+    TWILIO_API_KEY: Optional[str] = None
+    TWILIO_API_SECRET: Optional[str] = None
     
     # Razorpay Payment Configuration
     RAZORPAY_KEY_ID: Optional[str] = None

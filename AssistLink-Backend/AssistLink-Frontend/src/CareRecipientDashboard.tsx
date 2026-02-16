@@ -42,7 +42,9 @@ type RootStackParamList = {
   EmergencyScreen: undefined;
   Notifications: undefined;
   Profile: undefined;
-  RecipientSchedule: undefined;
+  Schedule: undefined;
+  Settings: undefined;
+  HelpSupport: undefined;
   // add others if needed
 };
 
@@ -130,9 +132,10 @@ const CareRecipientDashboard = () => {
   const loadCurrentBookings = async () => {
     try {
       setLoadingBookings(true);
-      // Load all bookings (no status filter) to get pending, accepted, and in_progress
+      // Load active bookings directly from API
       const bookings = await api.getDashboardBookings({
-        limit: 10
+        limit: 20,
+        status: 'pending,accepted,in_progress'
       });
       // Filter to only show active bookings (pending payment, accepted, or in_progress - not completed)
       const active = ((bookings as any[]) || []).filter((b: any) =>
@@ -485,8 +488,8 @@ const CareRecipientDashboard = () => {
         {/* STATUS SECTION HEADER */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Current Status</Text>
-          <TouchableOpacity onPress={() => navigation.navigate('Schedule')}>
-            <Text style={styles.link}>View Schedule</Text>
+          <TouchableOpacity onPress={() => navigation.navigate('BookingsScreen')}>
+            <Text style={styles.link}>View All</Text>
           </TouchableOpacity>
         </View>
 
