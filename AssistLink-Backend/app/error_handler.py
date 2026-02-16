@@ -129,6 +129,18 @@ class ConfigurationError(AppError):
         )
 
 
+
+class ConfigurationError(AppError):
+    """Server configuration errors"""
+    def __init__(self, message: str = "Server configuration error", details: Optional[Dict[str, Any]] = None):
+        super().__init__(
+            message=message,
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error_code="CONFIGURATION_ERROR",
+            details=details
+        )
+
+
 def create_error_response(
     request_id: str,
     error: Exception,
