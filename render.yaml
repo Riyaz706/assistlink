@@ -6,7 +6,7 @@ services:
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port 10000
-    rootDirectory: AssistLink-Backend
+    rootDirectory: backend
     envVars:
       - key: PYTHON_VERSION
         value: 3.9.0

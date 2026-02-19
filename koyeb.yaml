@@ -7,7 +7,7 @@ apps:
         instance_type: nano
         regions:
           - fra
-        root_dir: AssistLink-Backend
+        root_dir: backend
         docker_command: uvicorn app.main:app --host 0.0.0.0 --port 8000
         env:
           - key: ENVIRONMENT
