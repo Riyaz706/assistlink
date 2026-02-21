@@ -15,6 +15,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from app.limiter import limiter
+from src.config.db import DatabaseConnectionError
 import time
 import traceback
 import uuid
@@ -86,6 +87,20 @@ async def log_requests(request: Request, call_next):
         raise
 
 # Register custom error handlers
+async def database_connection_error_handler(_request: Request, exc: DatabaseConnectionError) -> JSONResponse:
+    """Return 503 with a short message so the app does not show the raw DB error."""
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={
+            "error": {
+                "code": "DATABASE_UNAVAILABLE",
+                "message": "Database is temporarily unavailable. Please try again in a moment.",
+                "status": 503,
+            }
+        },
+    )
+
+app.add_exception_handler(DatabaseConnectionError, database_connection_error_handler)
 app.add_exception_handler(AppError, app_error_handler)
 app.add_exception_handler(HTTPException, http_exception_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)

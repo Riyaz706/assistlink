@@ -63,20 +63,14 @@ def get_db_pool() -> psycopg2.pool.SimpleConnectionPool:
                     minconn=2, maxconn=10, dsn=dsn, connect_timeout=15
                 )
             else:
-                supabase_url = os.getenv("SUPABASE_URL") or (settings.SUPABASE_URL if settings else None)
-                if not supabase_url:
-                    raise ValueError("Missing config: DATABASE_URL or SUPABASE_URL required.")
-                project_ref = supabase_url.replace("https://", "").replace("http://", "").split(".")[0]
-                db_host = f"db.{project_ref}.supabase.co"
-                db_password = os.getenv("SUPABASE_DB_PASSWORD")
-                if not db_password:
-                    raise ValueError("Missing config: SUPABASE_DB_PASSWORD required.")
-                _connection_pool = psycopg2.pool.ThreadedConnectionPool(
-                    minconn=2, maxconn=10,
-                    host=db_host, database="postgres",
-                    user="postgres", password=db_password,
-                    port=5432, sslmode="require", connect_timeout=10
+                # Do NOT use direct db.xxx.supabase.co:5432 from cloud (Render) — it often fails with "Network is unreachable".
+                # Require DATABASE_URL set to the Supabase pooler (port 6543) in Render Environment.
+                msg = (
+                    "DATABASE_URL is not set. On Render, set DATABASE_URL to the Supabase pooler URI "
+                    "(Supabase Dashboard → Settings → Database → Connection string → URI → Session or Transaction, port 6543). "
+                    "Remove SUPABASE_DB_PASSWORD from Render so the app does not try the direct connection."
                 )
+                raise DatabaseConnectionError(msg)
         except Exception as e:
             import sys
             error_details = str(e)
