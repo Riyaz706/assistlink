@@ -53,8 +53,9 @@ https://your-project-id.web.app,https://your-project-id.firebaseapp.com
    - **service_role** → click Reveal → copy → use as `SUPABASE_SERVICE_ROLE_KEY`.
 3. **Settings** → **Database**:
    - Under **Connection string** choose **URI**.
-   - Copy the URI; replace `[YOUR-PASSWORD]` with your database password.
-   - Use that as `DATABASE_URL`.
+   - **Important for Render:** Use the **Session** or **Transaction** pooler (port **6543**), not the direct connection (port 5432). Direct `db.xxx.supabase.co:5432` often fails from Render with "Network is unreachable".
+   - Copy the **pooler** URI (host like `aws-0-xx.pooler.supabase.com`, port **6543**); replace `[YOUR-PASSWORD]` with your database password.
+   - Use that as `DATABASE_URL` in Render.
 
 ### Twilio (optional — for video/SMS)
 
