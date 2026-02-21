@@ -10,7 +10,7 @@ services:
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
-        value: "3.9"
+        value: "3.9.18"
       - key: ENVIRONMENT
         value: production
       - key: SUPABASE_URL
