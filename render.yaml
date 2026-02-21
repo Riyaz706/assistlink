@@ -5,18 +5,24 @@ services:
     region: singapore # or ohio/frankfurt/oregon
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port 10000
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     rootDirectory: backend
     envVars:
       - key: PYTHON_VERSION
-        value: 3.9.0
-      - key: PORT
-        value: 10000
+        value: "3.9.0"
+      - key: ENVIRONMENT
+        value: production
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_ANON_KEY
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: CORS_ORIGINS
         sync: false
       - key: TWILIO_ACCOUNT_SID
         sync: false
