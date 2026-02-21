@@ -150,8 +150,25 @@ async def health_check():
 
 @app.get("/health/db")
 async def health_check_db():
-    """Stubbed DB health — always returns ok (using Supabase client, no direct SQL)."""
-    return {"status": "ok", "database": "supabase-client"}
+    """Test direct DB pool (Postgres). Returns error detail if pool fails (e.g. wrong DATABASE_URL)."""
+    try:
+        from src.config.db import get_db_pool, DatabaseConnectionError
+        pool = get_db_pool()
+        conn = pool.getconn()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            cur.close()
+        finally:
+            pool.putconn(conn)
+        return {"status": "ok", "database": "connected"}
+    except Exception as e:
+        return {
+            "status": "error",
+            "database": "disconnected",
+            "detail": str(e),
+            "hint": "Set DATABASE_URL in Render to Supabase pooler URI (port 6543). See docs/RENDER_ENV_VARS.md",
+        }
 
 
 @app.on_event("shutdown")

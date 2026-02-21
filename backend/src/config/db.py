@@ -53,8 +53,14 @@ def get_db_pool() -> psycopg2.pool.SimpleConnectionPool:
 
         try:
             if database_url:
+                # Ensure SSL for Supabase pooler (required for port 6543)
+                dsn = database_url.strip()
+                if "sslmode=" not in dsn and "?" not in dsn:
+                    dsn = f"{dsn}?sslmode=require"
+                elif "sslmode=" not in dsn and "?" in dsn:
+                    dsn = f"{dsn}&sslmode=require"
                 _connection_pool = psycopg2.pool.ThreadedConnectionPool(
-                    minconn=2, maxconn=10, dsn=database_url, connect_timeout=10
+                    minconn=2, maxconn=10, dsn=dsn, connect_timeout=15
                 )
             else:
                 supabase_url = os.getenv("SUPABASE_URL") or (settings.SUPABASE_URL if settings else None)
