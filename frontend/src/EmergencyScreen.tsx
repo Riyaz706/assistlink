@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Image, Animated, Vibration, StatusBar, Pressable, Linking, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Image, Animated, Vibration, StatusBar, Pressable, Linking, Alert, ActivityIndicator, Platform } from 'react-native';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { useAuth } from './context/AuthContext';
+import { useNotification } from './context/NotificationContext';
 import { api } from './api/client';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useErrorHandler } from './hooks/useErrorHandler';
@@ -21,6 +22,7 @@ const COLORS = {
 
 const EmergencyScreen = ({ navigation, route }: { navigation: any; route?: any }) => {
   const { user } = useAuth();
+  const { dismissEmergency } = useNotification();
   const [alertSent, setAlertSent] = useState(false);
   const [emergencyId, setEmergencyId] = useState<string | null>(null);
   const [emergencyStatus, setEmergencyStatus] = useState<'active' | 'acknowledged' | 'resolved' | null>(null);
@@ -118,8 +120,12 @@ const EmergencyScreen = ({ navigation, route }: { navigation: any; route?: any }
 
   const { handleError } = useErrorHandler();
   const [locationLoading, setLocationLoading] = useState(false);
+  const [sharedLocation, setSharedLocation] = useState<{ location_name?: string; latitude?: number; longitude?: number } | null>(null);
+  const triggerInProgressRef = useRef(false);
 
   const triggerEmergency = async () => {
+    if (alertSent || triggerInProgressRef.current) return;
+    triggerInProgressRef.current = true;
     Vibration.vibrate([0, 500, 200, 500]); // Vibrate pattern
     setLocationLoading(true);
 
@@ -151,24 +157,30 @@ const EmergencyScreen = ({ navigation, route }: { navigation: any; route?: any }
 
       const res = await api.triggerEmergency({
         location: locationData
-      });
+      }) as { emergency_id?: string };
 
       if (res.emergency_id) {
         setEmergencyId(res.emergency_id);
         setEmergencyStatus('active');
         setAlertSent(true);
+        setSharedLocation(locationData?.latitude != null ? { location_name: locationData.location_name || 'Current Location', latitude: locationData.latitude, longitude: locationData.longitude } : null);
       } else {
-        setAlertSent(true); // Fallback for old API compatibility
+        setAlertSent(true);
+        setSharedLocation(locationData?.latitude != null ? { location_name: locationData.location_name || 'Current Location', latitude: locationData.latitude, longitude: locationData.longitude } : null);
       }
-    } catch (error) {
+    } catch (error: any) {
       handleError(error, 'emergency-trigger');
+      const isOffline = error?.code === 'NETWORK_ERROR' || error?.code === 'TIMEOUT' || (error?.message && /network|timeout|connection|fetch/i.test(error.message));
       Alert.alert(
         "Emergency Alert Failed",
-        "Could not send digital alert. PLEASE CALL EMERGENCY SERVICES OR CONTACTS MANUALLY.",
+        isOffline
+          ? "You appear to be offline. The app could not send the alert. Call 911 or your emergency contact now."
+          : "Could not send digital alert. Please check your connection and try again, or call 911 or your emergency contact now.",
         [{ text: "OK" }]
       );
     } finally {
       setLocationLoading(false);
+      triggerInProgressRef.current = false;
     }
   };
 
@@ -177,7 +189,12 @@ const EmergencyScreen = ({ navigation, route }: { navigation: any; route?: any }
     try {
       await api.acknowledgeEmergency(emergencyId);
       setEmergencyStatus('acknowledged');
-      Alert.alert("Help Confirmed", "The care recipient has been notified that you are on your way.");
+      // Remove emergency from caregiver dashboard so it doesn't keep showing after they responded
+      dismissEmergency();
+      const notificationId = params?.notification?.id;
+      if (notificationId) {
+        api.markNotificationRead(notificationId).catch(() => {});
+      }
     } catch (error) {
       handleError(error, 'emergency-acknowledge');
     }
@@ -214,6 +231,8 @@ const EmergencyScreen = ({ navigation, route }: { navigation: any; route?: any }
         <TouchableOpacity
           onPress={() => navigation.goBack()}
           style={styles.closeBtn}
+          accessibilityLabel="Close emergency screen"
+          accessibilityRole="button"
         >
           <Ionicons name="close" size={28} color={COLORS.white} />
         </TouchableOpacity>
@@ -228,7 +247,9 @@ const EmergencyScreen = ({ navigation, route }: { navigation: any; route?: any }
           <Text style={styles.mainInstruction}>
             {isCaregiver
               ? (emergencyStatus === 'acknowledged' ? "YOU ARE RESPONDING" : "URGENT ASSISTANCE NEEDED")
-              : `Press and hold for ${<Text style={styles.boldText}>3 seconds</Text>}`}
+              : null}
+            {!isCaregiver && "Press and hold for "}
+            {!isCaregiver && <Text style={styles.boldText}>3 seconds</Text>}
           </Text>
           <Text style={styles.subInstruction}>
             {isCaregiver
@@ -255,9 +276,16 @@ const EmergencyScreen = ({ navigation, route }: { navigation: any; route?: any }
             <Pressable
               onPressIn={handlePressIn}
               onPressOut={handlePressOut}
+              disabled={locationLoading}
+              accessibilityLabel="Emergency SOS. Press and hold for 3 seconds to send alert."
+              accessibilityRole="button"
+              accessibilityState={{ disabled: locationLoading, busy: locationLoading }}
+              accessibilityHint="Activates emergency alert and shares your location with caregivers when held for 3 seconds."
             >
               <Animated.View style={[styles.sosButton, { transform: [{ scale: scaleAnim }] }]}>
-                {alertSent ? (
+                {locationLoading ? (
+                  <ActivityIndicator size="large" color="white" />
+                ) : alertSent ? (
                   <Ionicons name="checkmark" size={60} color="white" />
                 ) : (
                   <>
@@ -310,7 +338,7 @@ const EmergencyScreen = ({ navigation, route }: { navigation: any; route?: any }
           <Text style={styles.locationText}>
             {isCaregiver
               ? `Location: ${locationInfo?.location_name || 'Not provided'}`
-              : "Location shared: Near 123 Maple Ave"}
+              : (sharedLocation?.location_name ? `Location shared: ${sharedLocation.location_name}` : (alertSent ? 'Location shared' : 'Location will be shared when you trigger alert'))}
           </Text>
         </View>
 
@@ -324,6 +352,8 @@ const EmergencyScreen = ({ navigation, route }: { navigation: any; route?: any }
               <TouchableOpacity
                 style={[styles.callButton, { backgroundColor: '#10B981' }]}
                 onPress={acknowledge}
+                accessibilityLabel="I am on my way. Confirm you are responding."
+                accessibilityRole="button"
               >
                 <Ionicons name="checkmark-circle" size={24} color="white" style={{ marginRight: 10 }} />
                 <Text style={styles.callButtonText}>I am on my way</Text>
@@ -333,8 +363,17 @@ const EmergencyScreen = ({ navigation, route }: { navigation: any; route?: any }
             <TouchableOpacity
               style={[styles.callButton, { backgroundColor: '#3B82F6' }]}
               onPress={() => {
-                Alert.alert("Navigation", "Navigating to recipient's location...");
+                const lat = locationInfo?.latitude ?? data?.latitude;
+                const lng = locationInfo?.longitude ?? data?.longitude;
+                if (lat != null && lng != null && !isNaN(lat) && !isNaN(lng)) {
+                  const url = Platform.OS === 'web' ? `https://www.google.com/maps?q=${lat},${lng}` : `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+                  Linking.openURL(url).catch(() => Alert.alert("Error", "Could not open maps."));
+                } else {
+                  Alert.alert("Location Unavailable", "Recipient's location was not shared. Try calling them instead.");
+                }
               }}
+              accessibilityLabel="Open maps to navigate to recipient location"
+              accessibilityRole="button"
             >
               <Ionicons name="navigate" size={24} color="white" style={{ marginRight: 10 }} />
               <Text style={styles.callButtonText}>Navigate to Location</Text>
@@ -351,6 +390,8 @@ const EmergencyScreen = ({ navigation, route }: { navigation: any; route?: any }
                   Alert.alert("Error", "Contact number not available.");
                 }
               }}
+              accessibilityLabel="Call recipient"
+              accessibilityRole="button"
             >
               <Ionicons name="call" size={24} color="white" style={{ marginRight: 10 }} />
               <Text style={styles.callButtonText}>Call Recipient</Text>
@@ -359,6 +400,8 @@ const EmergencyScreen = ({ navigation, route }: { navigation: any; route?: any }
             <TouchableOpacity
               style={[styles.cancelButton, { marginTop: 10 }]}
               onPress={resolve}
+              accessibilityLabel="Mark emergency as resolved"
+              accessibilityRole="button"
             >
               <Text style={[styles.cancelText, { color: '#ef4444' }]}>Mark as Resolved</Text>
             </TouchableOpacity>
@@ -376,6 +419,8 @@ const EmergencyScreen = ({ navigation, route }: { navigation: any; route?: any }
                   Linking.openURL('tel:911');
                 }
               }}
+              accessibilityLabel={emergencyContact?.phone ? `Call ${emergencyContact.name || 'emergency contact'}` : respondingCaregiver?.phone ? `Call ${respondingCaregiver.full_name}` : 'Call 911'}
+              accessibilityRole="button"
             >
               <Ionicons name="call" size={24} color="white" style={{ marginRight: 10 }} />
               <Text style={styles.callButtonText}>
@@ -427,7 +472,11 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   closeBtn: {
-    padding: 5,
+    minWidth: 48,
+    minHeight: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 8,
   },
   content: {
     alignItems: 'center',
@@ -541,7 +590,7 @@ const styles = StyleSheet.create({
   locationText: {
     color: '#D1D5DB',
     marginLeft: 6,
-    fontSize: 14,
+    fontSize: 16,
   },
 
   // Footer Actions

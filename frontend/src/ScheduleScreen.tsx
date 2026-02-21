@@ -43,13 +43,15 @@ export default function ScheduleScreen({ navigation, route }: any) {
       clearError();
       const [videoCallsData, bookingsData] = await Promise.all([
         api.getDashboardVideoCalls({ limit: 100 }),
-        api.getDashboardBookings({ limit: 100 }),
+        api.getDashboardBookings({
+          limit: 100,
+          status: 'requested,pending,accepted,in_progress,completed', // exclude cancelled
+        }),
       ]);
       console.log("[ScheduleScreen] Video calls fetched:", (videoCallsData as any[])?.length || 0);
       console.log("[ScheduleScreen] Bookings fetched:", (bookingsData as any[])?.length || 0);
-      // console.log("[ScheduleScreen] Bookings data:", JSON.stringify(bookingsData, null, 2));
-      setVideoCalls((videoCallsData as any[]) || []);
-      setBookings((bookingsData as any[]) || []);
+      setVideoCalls(Array.isArray(videoCallsData) ? videoCallsData : []);
+      setBookings(Array.isArray(bookingsData) ? bookingsData : []);
     } catch (e: any) {
       console.error("Failed to fetch schedule data:", e);
       handleError(e, 'schedule-fetch');
@@ -103,6 +105,8 @@ export default function ScheduleScreen({ navigation, route }: any) {
 
   const getStatusColor = (status: string) => {
     switch (status?.toLowerCase()) {
+      case 'requested':
+        return { bg: '#FEF3C7', text: '#B45309' };
       case 'pending':
         return { bg: THEME.pendingBg, text: THEME.pendingText };
       case 'accepted':
@@ -164,7 +168,7 @@ export default function ScheduleScreen({ navigation, route }: any) {
                 : formatTime(item.scheduled_time)}
             </Text>
           </View>
-          {item.duration_hours && (
+          {(item.duration_hours != null && item.duration_hours !== '') && (
             <View style={styles.dtItem}>
               <Icon name="timer" size={16} color={THEME.subText} />
               <Text style={styles.dtText}>{item.duration_hours}h</Text>
@@ -236,6 +240,7 @@ export default function ScheduleScreen({ navigation, route }: any) {
   const renderBookingItem = ({ item }: { item: any }) => {
     const statusColors = getStatusColor(item.status);
     const caregiver = item.caregiver || {};
+    const isRequested = (item.status || '').toLowerCase() === 'requested';
 
     const serviceTypeMap: Record<string, string> = {
       'exam_assistance': 'Exam Assistance',
@@ -250,6 +255,12 @@ export default function ScheduleScreen({ navigation, route }: any) {
 
     return (
       <View style={styles.card}>
+        {isRequested && (
+          <View style={styles.requestBanner}>
+            <Icon name="clock-outline" size={16} color="#B45309" />
+            <Text style={styles.requestBannerText}>Request sent — waiting for caregiver to respond</Text>
+          </View>
+        )}
         <View style={styles.cardHeader}>
           {caregiver.profile_photo_url ? (
             <Image source={{ uri: caregiver.profile_photo_url }} style={styles.avatar} />
@@ -282,7 +293,7 @@ export default function ScheduleScreen({ navigation, route }: any) {
             <Icon name="clock-outline" size={16} color={THEME.subText} />
             <Text style={styles.dtText}>{formatTime(item.scheduled_date)}</Text>
           </View>
-          {item.duration_hours && (
+          {(item.duration_hours != null && item.duration_hours !== '') && (
             <View style={styles.dtItem}>
               <Icon name="timer" size={16} color={THEME.subText} />
               <Text style={styles.dtText}>{item.duration_hours}h</Text>
@@ -445,6 +456,21 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 8,
     elevation: 2,
+  },
+  requestBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    marginBottom: 10,
+    gap: 6,
+  },
+  requestBannerText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#B45309',
   },
   cardHeader: { flexDirection: 'row', marginBottom: 12 },
   avatar: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#eee' },

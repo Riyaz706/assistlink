@@ -185,13 +185,9 @@ async def verify_care_recipient(current_user: dict = Depends(get_current_user)) 
             detail="Invalid user data"
         )
 
-    from src.config.db import execute_query
-    sys.stderr.write(f"[VERIFY_CR] Checking user role in database...\n")
-    sys.stderr.flush()
     try:
-        # Use direct SQL for much faster role checks
-        response = execute_query("SELECT role FROM users WHERE id = %s", (user_id,))
-        data = response[0] if response else None
+        res = supabase_admin.table("users").select("role").eq("id", user_id).execute()
+        data = res.data[0] if res.data else None
         sys.stderr.write(f"[VERIFY_CR] User role from DB: {data.get('role') if data else 'None'}\n")
         sys.stderr.flush()
     except Exception as e:
@@ -247,8 +243,7 @@ async def verify_care_recipient(current_user: dict = Depends(get_current_user)) 
             sys.stderr.write(f"[VERIFY_CR] User has role '{data.get('role')}', attempting to update to 'care_recipient'\n")
             sys.stderr.flush()
             try:
-                # Update role to care_recipient using direct SQL
-                execute_query("UPDATE users SET role = 'care_recipient' WHERE id = %s", (user_id,), fetch=False)
+                upd = supabase_admin.table("users").update({"role": "care_recipient"}).eq("id", user_id).execute()
                 sys.stderr.write(f"[VERIFY_CR] Successfully updated user role to 'care_recipient'\n")
                 sys.stderr.flush()
                 data = {"role": "care_recipient"}
@@ -292,11 +287,9 @@ async def verify_caregiver(current_user: dict = Depends(get_current_user)) -> di
             detail="Invalid user data"
         )
 
-    from src.config.db import execute_query
-    # Try to get user profile to check role - use direct SQL
     try:
-        response = execute_query("SELECT role FROM users WHERE id = %s", (user_id,))
-        data = response[0] if response else None
+        res = supabase_admin.table("users").select("role").eq("id", user_id).execute()
+        data = res.data[0] if res.data else None
     except Exception:
         data = None
 

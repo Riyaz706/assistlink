@@ -41,8 +41,9 @@ const Polyline = function Polyline() {
   return null;
 };
 
-// Mock PROVIDER_DEFAULT
+// Mock PROVIDER_DEFAULT and PROVIDER_GOOGLE (real module exports these for Google Maps)
 const PROVIDER_DEFAULT = undefined;
+const PROVIDER_GOOGLE = undefined;
 
 // Mock AnimatedMapView (used as Animated)
 const AnimatedMapView = MapView;
@@ -63,6 +64,7 @@ const MapsModule = {
   Marker,
   Polyline,
   PROVIDER_DEFAULT,
+  PROVIDER_GOOGLE,
   Animated: AnimatedMapView,
   AnimatedMapView,
   MAP_TYPES,
@@ -85,6 +87,7 @@ module.exports.MapView = MapView;
 module.exports.Marker = Marker;
 module.exports.Polyline = Polyline;
 module.exports.PROVIDER_DEFAULT = PROVIDER_DEFAULT;
+module.exports.PROVIDER_GOOGLE = PROVIDER_GOOGLE;
 module.exports.Animated = AnimatedMapView;
 module.exports.AnimatedMapView = AnimatedMapView;
 module.exports.MAP_TYPES = MAP_TYPES;

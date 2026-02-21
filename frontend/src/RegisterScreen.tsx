@@ -168,6 +168,8 @@ const RegisterScreen = ({ navigation }: any) => {
             <TouchableOpacity
               onPress={() => navigation.goBack()}
               style={styles.backButton}
+              accessibilityLabel="Go back"
+              accessibilityRole="button"
             >
               <Icon name="arrow-left" size={26} color={COLORS.darkText} />
             </TouchableOpacity>
@@ -191,6 +193,9 @@ const RegisterScreen = ({ navigation }: any) => {
               style={[styles.roleCard, selectedRole === 'find' && styles.roleCardSelected]}
               onPress={() => setSelectedRole('find')}
               activeOpacity={0.9}
+              accessibilityLabel="Find care"
+              accessibilityRole="radio"
+              accessibilityState={{ selected: selectedRole === 'find' }}
             >
               {selectedRole === 'find' && (
                 <View style={styles.checkIcon}>
@@ -208,6 +213,9 @@ const RegisterScreen = ({ navigation }: any) => {
               style={[styles.roleCard, selectedRole === 'provide' && styles.roleCardSelected]}
               onPress={() => setSelectedRole('provide')}
               activeOpacity={0.9}
+              accessibilityLabel="Provide care as caregiver"
+              accessibilityRole="radio"
+              accessibilityState={{ selected: selectedRole === 'provide' }}
             >
               {selectedRole === 'provide' && (
                 <View style={styles.checkIcon}>
@@ -227,6 +235,9 @@ const RegisterScreen = ({ navigation }: any) => {
               style={[styles.socialButton, (!googleReady || loading || googleLoading) && { opacity: 0.6 }]}
               onPress={handleGoogleSignUp}
               disabled={!googleReady || loading || googleLoading}
+              accessibilityLabel={googleLoading || loading ? 'Signing up with Google' : 'Sign up with Google'}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !googleReady || loading || googleLoading }}
             >
               <Image
                 source={{ uri: 'https://cdn-icons-png.flaticon.com/512/2991/2991148.png' }}
@@ -257,6 +268,7 @@ const RegisterScreen = ({ navigation }: any) => {
                   placeholderTextColor={COLORS.placeholder}
                   value={fullName}
                   onChangeText={setFullName}
+                  accessibilityLabel="Full name"
                 />
                 <Icon name="account" size={20} color={COLORS.placeholder} />
               </View>
@@ -274,6 +286,7 @@ const RegisterScreen = ({ navigation }: any) => {
                   autoCapitalize="none"
                   value={email}
                   onChangeText={setEmail}
+                  accessibilityLabel="Email address"
                 />
                 <Icon name="email-outline" size={20} color={COLORS.placeholder} />
               </View>
@@ -297,6 +310,7 @@ const RegisterScreen = ({ navigation }: any) => {
                   maxLength={10}
                   value={phone}
                   onChangeText={setPhone}
+                  accessibilityLabel="Phone number"
                 />
                 <Icon name="phone-outline" size={20} color={COLORS.placeholder} />
               </View>
@@ -314,6 +328,7 @@ const RegisterScreen = ({ navigation }: any) => {
                   value={dob}
                   onChangeText={handleDateChange}
                   maxLength={10}
+                  accessibilityLabel="Date of birth"
                 />
                 <Icon name="calendar-month-outline" size={20} color={COLORS.placeholder} />
               </View>
@@ -330,8 +345,13 @@ const RegisterScreen = ({ navigation }: any) => {
                   secureTextEntry={!isPasswordVisible}
                   value={password}
                   onChangeText={setPassword}
+                  accessibilityLabel="Password"
                 />
-                <TouchableOpacity onPress={() => setIsPasswordVisible(!isPasswordVisible)}>
+                <TouchableOpacity
+                  onPress={() => setIsPasswordVisible(!isPasswordVisible)}
+                  accessibilityLabel={isPasswordVisible ? 'Hide password' : 'Show password'}
+                  accessibilityRole="button"
+                >
                   <Icon name={isPasswordVisible ? "eye-outline" : "eye-off-outline"} size={20} color={COLORS.placeholder} />
                 </TouchableOpacity>
               </View>
@@ -351,6 +371,9 @@ const RegisterScreen = ({ navigation }: any) => {
               activeOpacity={0.8}
               onPress={handleCreateAccount}
               disabled={loading}
+              accessibilityLabel={loading ? 'Creating account' : 'Create account'}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: loading }}
             >
               <Text style={styles.createButtonText}>
                 {loading ? 'Creating...' : 'Create Account'}
@@ -362,7 +385,11 @@ const RegisterScreen = ({ navigation }: any) => {
           {/* Footer */}
           <View style={styles.footer}>
             <Text style={styles.footerText}>Already have an account? </Text>
-            <TouchableOpacity onPress={() => navigation.navigate('Login')}>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('Login')}
+              accessibilityLabel="Go to log in"
+              accessibilityRole="button"
+            >
               <Text style={styles.loginLink}>Log in</Text>
             </TouchableOpacity>
           </View>

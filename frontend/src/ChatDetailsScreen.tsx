@@ -204,32 +204,33 @@ const ChatDetailsScreen = ({ route, navigation }: any) => {
           <TouchableOpacity
             style={[styles.iconBtn, styles.videoBtn]}
             onPress={async () => {
+              if (!chatSessionId) {
+                alert('Cannot start video call: chat session not found.');
+                return;
+              }
               try {
-                // For simplicity, we create a request immediately to generate a room URL
-                // In a real app, this might be a multi-step process
-                // But this gets us "Direct Real Time Video Call"
                 setLoading(true);
-                // We need caregiver ID... if we don't have it (e.g. we are caregiver), we can't 'request' ourselves
-                // This logic implies Care Recipient starts the call.
-                // If user is caregiver, they should probably just 'join' a room or send a link?
-                // For Jitsi, we can just generate a room based on the session ID!
-                // But to save backend state, let's use the existing video call request API if possible
-
-                // Hack/Feature: Generate Jitsi URL from Chat Session ID for instant connection
-                // This bypasses the 'request' flow for 'direct' calls
-                const directUrl = `https://meet.jit.si/assistlink-chat-${chatSessionId}`;
-
+                clearError();
+                const videoCall = await api.createVideoCallFromChat(chatSessionId) as { id: string; video_call_url?: string };
+                const callId = videoCall?.id;
+                if (!callId) {
+                  alert('Failed to start video call. Please try again.');
+                  return;
+                }
                 navigation.navigate('VideoCallScreen', {
-                  videoCallUrl: directUrl,
+                  callId,
                   otherPartyName: otherPartyName || 'User',
                 });
-              } catch (e) {
-                console.error(e);
-                alert('Failed to start video call');
+              } catch (e: any) {
+                console.error('Video call from chat failed:', e);
+                handleError(e, 'video-call-from-chat');
+                alert(e?.message || 'Failed to start video call. Please try again.');
               } finally {
                 setLoading(false);
               }
             }}
+            accessibilityLabel="Start video call"
+            accessibilityRole="button"
           >
             <Icon name="video-outline" size={24} color={THEME.primary} />
           </TouchableOpacity>
@@ -326,6 +327,9 @@ const ChatDetailsScreen = ({ route, navigation }: any) => {
               style={[styles.sendBtn, (!inputText.trim() || sending) && styles.sendBtnDisabled]}
               onPress={sendMessage}
               disabled={!inputText.trim() || sending}
+              accessibilityLabel={sending ? 'Sending message' : 'Send message'}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !inputText.trim() || sending }}
             >
               {sending ? (
                 <ActivityIndicator size="small" color={THEME.white} />
@@ -360,6 +364,9 @@ const styles = StyleSheet.create({
     borderBottomColor: '#EEE',
   },
   backBtn: {
+    minWidth: 48,
+    minHeight: 48,
+    justifyContent: 'center',
     marginRight: 12,
   },
   headerInfo: {

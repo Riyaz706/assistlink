@@ -13,7 +13,8 @@ import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 // If you are NOT using Expo (Bare React Native), uncomment this:
 // import Icon from 'react-native-vector-icons/MaterialCommunityIcons'; 
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors as themeColors } from './theme';
+import { colors as themeColors, typography as themeTypography, accessibility as themeA11y } from './theme';
+import { useTheme } from './context/ThemeContext';
 
 const COLORS = {
   background: themeColors.background,
@@ -36,6 +37,11 @@ const LoginScreen = ({ navigation }: any) => {
   const { login, googleLogin } = useAuth();
   const { signInWithGoogle, loading: googleLoading, isReady: googleReady } = useGoogleAuth();
   const { error, handleError, clearError } = useErrorHandler();
+  const { colors: themeColorsResolved, typography: themeTypography } = useTheme();
+  const activeColors = themeColorsResolved;
+  const activeBg = activeColors.background;
+  const activeTitleSize = typeof themeTypography.headingLarge === 'number' ? themeTypography.headingLarge : 24;
+  const activeBodySize = typeof themeTypography.body === 'number' ? themeTypography.body : 16;
 
   const handleGoogleSignIn = async () => {
     setLoading(true);
@@ -93,8 +99,8 @@ const LoginScreen = ({ navigation }: any) => {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: activeBg }]}>
+      <StatusBar barStyle="dark-content" backgroundColor={activeBg} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.container}>
@@ -104,7 +110,12 @@ const LoginScreen = ({ navigation }: any) => {
 
           {/* Header Back Button */}
           <View style={styles.header}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={{ padding: 8 }}>
+            <TouchableOpacity
+              onPress={() => navigation.goBack()}
+              style={styles.backButton}
+              accessibilityLabel="Go back"
+              accessibilityRole="button"
+            >
               <Icon name="arrow-left" size={26} color={COLORS.darkText} />
             </TouchableOpacity>
           </View>
@@ -118,8 +129,8 @@ const LoginScreen = ({ navigation }: any) => {
 
           {/* Title and Subtitle */}
           <View style={styles.titleContainer}>
-            <Text style={styles.title}>Welcome Back</Text>
-            <Text style={styles.subtitle}>
+            <Text style={[styles.title, { fontSize: activeTitleSize }]}>Welcome Back</Text>
+            <Text style={[styles.subtitle, { fontSize: activeBodySize }]}>
               Sign in to manage your care plan and connect with caregivers.
             </Text>
           </View>
@@ -138,6 +149,8 @@ const LoginScreen = ({ navigation }: any) => {
                   autoCapitalize="none"
                   value={email}
                   onChangeText={setEmail}
+                  accessibilityLabel="Email or username"
+                  accessibilityHint="Enter your email address to sign in"
                 />
               </View>
             </View>
@@ -153,10 +166,15 @@ const LoginScreen = ({ navigation }: any) => {
                   secureTextEntry={!isPasswordVisible}
                   value={password}
                   onChangeText={setPassword}
+                  accessibilityLabel="Password"
+                  accessibilityHint="Enter your password"
                 />
                 <TouchableOpacity
                   onPress={() => setIsPasswordVisible(!isPasswordVisible)}
-                  style={styles.eyeIcon}>
+                  style={styles.eyeIcon}
+                  accessibilityLabel={isPasswordVisible ? 'Hide password' : 'Show password'}
+                  accessibilityRole="button"
+                >
                   <Icon
                     name={isPasswordVisible ? 'eye-outline' : 'eye-off-outline'}
                     size={20}
@@ -169,6 +187,8 @@ const LoginScreen = ({ navigation }: any) => {
             <TouchableOpacity
               style={styles.forgotButton}
               onPress={() => navigation.navigate('ForgotPassword')}
+              accessibilityLabel="Forgot password"
+              accessibilityRole="link"
             >
               <Text style={styles.forgotText}>Forgot Password?</Text>
             </TouchableOpacity>
@@ -186,8 +206,11 @@ const LoginScreen = ({ navigation }: any) => {
               onPress={handleLogin}
               disabled={loading}
               delayPressIn={0}
+              accessibilityLabel={loading ? 'Logging in' : 'Log in'}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: loading }}
             >
-              <Text style={styles.loginButtonText}>
+              <Text style={[styles.loginButtonText, { fontSize: activeBodySize }]}>
                 {loading ? 'Logging in...' : 'Log In'}
               </Text>
             </TouchableOpacity>
@@ -208,6 +231,8 @@ const LoginScreen = ({ navigation }: any) => {
               style={[styles.socialButton, { opacity: (!googleReady || loading || googleLoading) ? 0.5 : 1 }]}
               onPress={handleGoogleSignIn}
               disabled={!googleReady || loading || googleLoading}
+              accessibilityLabel="Sign in with Google"
+              accessibilityRole="button"
             >
               {/* Using a generic URL for the Google Logo */}
               <Image
@@ -221,7 +246,11 @@ const LoginScreen = ({ navigation }: any) => {
           {/* Footer Register Link */}
           <View style={styles.footer}>
             <Text style={styles.footerText}>Don't have an account? </Text>
-            <TouchableOpacity onPress={() => navigation.navigate('Register')}>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('Register')}
+              accessibilityLabel="Go to registration"
+              accessibilityRole="button"
+            >
               <Text style={styles.registerText}>Register</Text>
             </TouchableOpacity>
           </View>
@@ -250,7 +279,7 @@ const styles = StyleSheet.create({
   errorText: {
     color: '#DC2626',
     marginLeft: 8,
-    fontSize: 14,
+    fontSize: themeTypography.bodySmall,
     flex: 1,
   },
   container: {
@@ -264,6 +293,13 @@ const styles = StyleSheet.create({
   header: {
     marginTop: Platform.OS === 'android' ? 20 : 10,
     marginBottom: 20,
+  },
+  backButton: {
+    minWidth: themeA11y.minTouchTargetSize,
+    minHeight: themeA11y.minTouchTargetSize,
+    justifyContent: 'center',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
   },
   logoContainer: {
     alignItems: 'center',
@@ -301,7 +337,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   label: {
-    fontSize: 14,
+    fontSize: themeTypography.body,
     fontWeight: '600',
     color: COLORS.darkText,
     marginBottom: 8,
@@ -326,7 +362,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   eyeIcon: {
-    padding: 8,
+    minWidth: themeA11y.minTouchTargetSize,
+    minHeight: themeA11y.minTouchTargetSize,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   forgotButton: {
     alignSelf: 'flex-end',
@@ -334,7 +373,7 @@ const styles = StyleSheet.create({
   },
   forgotText: {
     color: COLORS.primaryGreen,
-    fontSize: 14,
+    fontSize: themeTypography.bodySmall,
     fontWeight: '600',
   },
   loginButton: {
@@ -367,7 +406,7 @@ const styles = StyleSheet.create({
   dividerText: {
     marginHorizontal: 16,
     color: COLORS.grayText,
-    fontSize: 14,
+    fontSize: themeTypography.bodySmall,
   },
   socialRow: {
     flexDirection: 'row',
@@ -403,7 +442,7 @@ const styles = StyleSheet.create({
   },
   footerText: {
     color: COLORS.grayText,
-    fontSize: 14,
+    fontSize: themeTypography.bodySmall,
   },
   registerText: {
     color: COLORS.primaryGreen,

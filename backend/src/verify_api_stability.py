@@ -1,10 +1,13 @@
-import sys
 import os
+import sys
 import httpx
 import asyncio
 from datetime import datetime
 
-BASE_URL = "http://localhost:8000"
+BASE_URL = (os.getenv("API_BASE_URL") or os.getenv("BACKEND_URL") or "").rstrip("/")
+if not BASE_URL:
+    print("ERROR: Set API_BASE_URL (or BACKEND_URL) to your backend URL. Do not use localhost for multi-device testing.")
+    sys.exit(1)
 
 async def test_endpoint(name: str, method: str, path: str, json: dict = None, headers: dict = None):
     print(f"Testing {name} ({method} {path})...", end=" ", flush=True)

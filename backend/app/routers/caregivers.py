@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException, status, Depends, Query
+from fastapi import APIRouter, HTTPException, status, Depends, Query, Response
 from typing import Optional, List
-from app.schemas import CaregiverProfileCreate, CaregiverProfileUpdate, CaregiverProfileResponse
-from app.database import supabase
+from datetime import datetime, timedelta, timezone
+from app.schemas import CaregiverProfileCreate, CaregiverProfileUpdate, CaregiverProfileResponse, SlotListItem
+from app.database import supabase, supabase_admin
 from app.dependencies import get_current_user, get_optional_user, verify_caregiver
 
 router = APIRouter()
@@ -394,6 +395,133 @@ async def list_caregivers(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
         )
+
+
+def _slot_overlap(s_start: datetime, s_end: datetime, b_start: datetime, b_end: datetime) -> bool:
+    """Overlap: (startA < endB) AND (endA > startB). All UTC."""
+    return s_start < b_end and s_end > b_start
+
+
+@router.get("/{caregiver_id}/slots", response_model=List[SlotListItem])
+async def get_caregiver_slots(
+    caregiver_id: str,
+    response: Response,
+    from_date: str = Query(..., description="Start of range (ISO datetime UTC)"),
+    to_date: str = Query(..., description="End of range (ISO datetime UTC)"),
+    slot_duration_minutes: int = Query(60, ge=15, le=240, description="Slot length in minutes"),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    List slots for a caregiver with availability. Backend is the single source of truth.
+    Returns [{ start, end, available }] in UTC. Excludes past slots (available=false for past).
+    Overlap rule: (startA < endB) AND (endA > startB). Pending + confirmed bookings block slots.
+    """
+    try:
+        from_parsed = datetime.fromisoformat(from_date.replace("Z", "+00:00"))
+        to_parsed = datetime.fromisoformat(to_date.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid from_date or to_date; use ISO format (UTC).")
+    if from_parsed.tzinfo is None:
+        from_parsed = from_parsed.replace(tzinfo=timezone.utc)
+    if to_parsed.tzinfo is None:
+        to_parsed = to_parsed.replace(tzinfo=timezone.utc)
+    if from_parsed >= to_parsed:
+        raise HTTPException(status_code=400, detail="from_date must be before to_date.")
+    if slot_duration_minutes <= 0:
+        raise HTTPException(status_code=400, detail="slot_duration_minutes must be positive.")
+
+    # Caregiver exists and is caregiver role
+    user_row = supabase_admin.table("users").select("id, role, is_active").eq("id", caregiver_id).execute()
+    if not user_row.data or user_row.data[0].get("role") != "caregiver":
+        raise HTTPException(status_code=404, detail="Caregiver not found.")
+    if not user_row.data[0].get("is_active", True):
+        raise HTTPException(status_code=422, detail="Caregiver is not available.")
+
+    now_utc = datetime.now(timezone.utc)
+    delta = timedelta(minutes=slot_duration_minutes)
+    slot_start = from_parsed
+    slots: List[dict] = []
+
+    # Fetch all blocking bookings in range (requested, accepted, confirmed, in_progress)
+    range_start = from_parsed - timedelta(days=1)
+    range_end = to_parsed + timedelta(days=1)
+    bookings_res = supabase_admin.table("bookings").select("scheduled_date, duration_hours").eq(
+        "caregiver_id", caregiver_id
+    ).in_("status", ["requested", "accepted", "confirmed", "in_progress"]).gte(
+        "scheduled_date", range_start.isoformat()
+    ).lte("scheduled_date", range_end.isoformat()).execute()
+    blocking: List[tuple] = []
+    for b in (bookings_res.data or []):
+        start_str = (b.get("scheduled_date") or "").replace("Z", "+00:00")
+        if not start_str:
+            continue
+        b_start = datetime.fromisoformat(start_str)
+        if b_start.tzinfo is None:
+            b_start = b_start.replace(tzinfo=timezone.utc)
+        dur = float(b.get("duration_hours") or 0)
+        if dur <= 0:
+            continue
+        b_end = b_start + timedelta(hours=dur)
+        blocking.append((b_start, b_end))
+
+    while slot_start + delta <= to_parsed:
+        slot_end = slot_start + delta
+        # Past slots are not available for booking
+        if slot_end <= now_utc:
+            slots.append({"start": slot_start, "end": slot_end, "available": False})
+        else:
+            available = True
+            for b_start, b_end in blocking:
+                if _slot_overlap(slot_start, slot_end, b_start, b_end):
+                    available = False
+                    break
+            slots.append({"start": slot_start, "end": slot_end, "available": available})
+        slot_start = slot_end
+
+    result = [SlotListItem(start=s["start"], end=s["end"], available=s["available"]) for s in slots]
+    response.headers["Cache-Control"] = "max-age=60"
+    return result
+
+
+@router.get("/{caregiver_id}/busy-slots", response_model=List[dict])
+async def get_caregiver_busy_slots(
+    caregiver_id: str,
+    from_date: str = Query(..., description="Start of range (ISO datetime or date)"),
+    to_date: str = Query(..., description="End of range (ISO datetime or date)"),
+    current_user: dict = Depends(get_current_user),
+):
+    """Get time slots when the caregiver is already booked (accepted/confirmed/in_progress). Used to show free vs busy before booking."""
+    try:
+        from_parsed = datetime.fromisoformat(from_date.replace("Z", "+00:00"))
+        to_parsed = datetime.fromisoformat(to_date.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid from_date or to_date; use ISO format.")
+    if from_parsed.tzinfo is None:
+        from_parsed = from_parsed.replace(tzinfo=timezone.utc)
+    if to_parsed.tzinfo is None:
+        to_parsed = to_parsed.replace(tzinfo=timezone.utc)
+    if from_parsed >= to_parsed:
+        raise HTTPException(status_code=400, detail="from_date must be before to_date.")
+    res = supabase_admin.table("bookings").select("scheduled_date, duration_hours").eq("caregiver_id", caregiver_id).in_("status", ["accepted", "confirmed", "in_progress"]).gte("scheduled_date", from_parsed.isoformat()).lte("scheduled_date", to_parsed.isoformat()).execute()
+    now_utc = datetime.now(timezone.utc)
+    slots = []
+    for b in res.data or []:
+        start_str = (b.get("scheduled_date") or "").replace("Z", "+00:00")
+        if not start_str:
+            continue
+        start = datetime.fromisoformat(start_str)
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        dur = float(b.get("duration_hours") or 0)
+        if dur <= 0:
+            continue
+        if dur > 24:
+            dur = 24
+        end = start + timedelta(hours=dur)
+        if end <= now_utc:
+            continue
+        slots.append({"start": start.isoformat(), "end": end.isoformat()})
+    return slots
 
 
 @router.get("/{caregiver_id}", response_model=dict)

@@ -150,8 +150,16 @@ class VideoCallRequestResponse(BaseModel):
         from_attributes = True
 
 
+class VideoCallFromChatRequest(BaseModel):
+    chat_session_id: UUID
+
+
 class VideoCallAcceptRequest(BaseModel):
     accept: bool
+
+
+class VideoCallStatusUpdate(BaseModel):
+    status: str = Field(..., pattern="^(pending|accepted|rejected|in_progress|completed|cancelled|missed)$")
 
 
 # Chat Session Schemas
@@ -287,6 +295,40 @@ class BookingStatusUpdate(BaseModel):
     status: str = Field(..., pattern="^(requested|accepted|rejected|confirmed|in_progress|completed|cancelled)$")
     reason: Optional[str] = None
 
+
+class SlotAvailabilityQuery(BaseModel):
+    """Query params for slot availability check."""
+    caregiver_id: UUID
+    start_time: datetime
+    end_time: datetime
+
+
+class SlotAvailabilityResponse(BaseModel):
+    """Response for slot availability check."""
+    available: bool
+    caregiver_id: UUID
+    start_time: datetime
+    end_time: datetime
+
+
+class SlotBookRequest(BaseModel):
+    """Request body for atomic slot booking (PWA / direct slot book)."""
+    caregiver_id: UUID
+    service_type: str = Field(..., pattern="^(exam_assistance|daily_care|one_time|recurring|video_call_session)$")
+    scheduled_date: datetime
+    duration_hours: float = Field(default=2.0, ge=0.5, le=24.0)
+    location: Optional[Dict[str, Any]] = None
+    specific_needs: Optional[str] = None
+    is_emergency: bool = False
+    video_call_request_id: Optional[UUID] = None
+    chat_session_id: Optional[UUID] = None
+
+
+class SlotListItem(BaseModel):
+    """Single slot in list: start/end in UTC ISO, available = not overlapping pending/confirmed."""
+    start: datetime
+    end: datetime
+    available: bool
 
 
 # Location Schemas

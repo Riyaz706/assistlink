@@ -45,11 +45,27 @@ type RootStackParamList = {
   Schedule: undefined;
   Settings: undefined;
   HelpSupport: undefined;
+  NSSPortal: undefined;
   // add others if needed
 };
 
 const GREEN = "#059669";
 const RED = "#EF4444";
+
+/** Human-readable label and color for booking status in Current Status section */
+function getBookingStatusDisplay(status: string): { label: string; color: string } {
+  const map: Record<string, { label: string; color: string }> = {
+    requested: { label: 'Request sent', color: '#6B7280' },
+    pending: { label: 'Pending', color: '#F59E0B' },
+    accepted: { label: 'Scheduled', color: '#2563EB' },
+    confirmed: { label: 'Confirmed', color: '#059669' },
+    in_progress: { label: 'In progress', color: '#059669' },
+    completed: { label: 'Completed', color: '#6B7280' },
+    cancelled: { label: 'Cancelled', color: '#DC2626' },
+    missed: { label: 'Missed', color: '#DC2626' },
+  };
+  return map[status] || { label: status, color: '#6B7280' };
+}
 const SWIPE_HEIGHT = 56;
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const BUTTON_WIDTH = SCREEN_WIDTH - 32;
@@ -138,11 +154,11 @@ const CareRecipientDashboard = () => {
       // Load active bookings directly from API
       const bookings = await api.getDashboardBookings({
         limit: 20,
-        status: 'pending,accepted,in_progress'
+        status: 'requested,pending,accepted,in_progress' // requested = sent, waiting for caregiver
       });
-      // Filter to only show active bookings (pending payment, accepted, or in_progress - not completed)
+      // Filter to only show active bookings (requested, pending, accepted, or in_progress - not completed/cancelled)
       const active = ((bookings as any[]) || []).filter((b: any) =>
-        b.status === 'pending' || b.status === 'accepted' || b.status === 'in_progress'
+        b.status === 'requested' || b.status === 'pending' || b.status === 'accepted' || b.status === 'in_progress'
       );
 
       // Remove duplicates - keep only the most recent booking for each caregiver
@@ -259,6 +275,7 @@ const CareRecipientDashboard = () => {
     else if (action === 'Settings') navigation.navigate('Settings');
     else if (action === 'HelpSupport') navigation.navigate('HelpSupport');
     else if (action === 'Feedback') navigation.navigate('HelpSupport');
+    else if (action === 'NSSPortal') navigation.navigate('NSSPortal');
     else if (action === 'Logout') {
       logout().catch((e: any) => handleError(e, 'logout'));
     }
@@ -284,8 +301,6 @@ const CareRecipientDashboard = () => {
         await refreshUser();
       }
 
-      setShowSosModal(false);
-      Alert.alert("Success", "Emergency contact saved successfully!");
       setShowSosModal(false);
       Alert.alert("Success", "Emergency contact saved successfully!");
     } catch (e: any) {
@@ -316,7 +331,12 @@ const CareRecipientDashboard = () => {
           >
             <Animated.View style={[styles.modalContent, { transform: [{ scale: scaleValue }] }]}>
 
-              <TouchableOpacity style={styles.closeBtn} onPress={handleCloseModal}>
+              <TouchableOpacity
+                style={styles.closeBtn}
+                onPress={handleCloseModal}
+                accessibilityLabel="Close"
+                accessibilityRole="button"
+              >
                 <Icon name="close" size={20} color="#999" />
               </TouchableOpacity>
 
@@ -361,7 +381,12 @@ const CareRecipientDashboard = () => {
                 </View>
               </View>
 
-              <TouchableOpacity style={styles.confirmBtn} onPress={handleSaveContact}>
+              <TouchableOpacity
+                style={styles.confirmBtn}
+                onPress={handleSaveContact}
+                accessibilityLabel="Confirm and save contact"
+                accessibilityRole="button"
+              >
                 <Text style={styles.confirmBtnText}>Confirm & Save</Text>
               </TouchableOpacity>
 
@@ -370,7 +395,7 @@ const CareRecipientDashboard = () => {
         </View>
       </Modal>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
 
         {/* HEADER - Hamburger (PRD) + Date/Title + Notifications */}
         <View style={styles.headerRow}>
@@ -395,7 +420,7 @@ const CareRecipientDashboard = () => {
             onPress={() => navigation.navigate('Notifications')}
             delayPressIn={0}
             activeOpacity={0.6}
-            accessibilityLabel="View Notifications"
+            accessibilityLabel="View notifications"
             accessibilityRole="button"
           >
             <Icon name="bell-outline" size={24} color={colors.textPrimary} />
@@ -417,7 +442,7 @@ const CareRecipientDashboard = () => {
                 <Icon name="alert-octagon" size={22} color={colors.error} />
                 <Text style={styles.menuItemText}>Emergency Services</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuVisible(false); }} delayPressIn={0} activeOpacity={0.6}>
+              <TouchableOpacity style={styles.menuItem} onPress={() => handleMenuAction('NSSPortal')} delayPressIn={0} activeOpacity={0.6}>
                 <Icon name="school" size={22} color={colors.primary} />
                 <Text style={styles.menuItemText}>NSS Portal</Text>
               </TouchableOpacity>
@@ -446,6 +471,8 @@ const CareRecipientDashboard = () => {
           style={styles.profileCard}
           activeOpacity={0.6}
           onPress={() => navigation.navigate('Profile')}
+          accessibilityLabel="Open profile"
+          accessibilityRole="button"
           delayPressIn={0}
         >
           <View style={styles.profileLeft}>
@@ -495,10 +522,27 @@ const CareRecipientDashboard = () => {
         {/* STATUS SECTION HEADER */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Current Status</Text>
-          <TouchableOpacity onPress={() => (navigation as any).navigate('BookingsScreen')}>
+          <TouchableOpacity
+            onPress={() => (navigation as any).navigate('BookingsScreen')}
+            accessibilityLabel="View all bookings"
+            accessibilityRole="button"
+          >
             <Text style={styles.link}>View All</Text>
           </TouchableOpacity>
         </View>
+
+        {/* CURRENT STATUS SUMMARY */}
+        {!loadingBookings && (
+          <View style={styles.statusSummaryWrap}>
+            <Text style={styles.statusSummaryText}>
+              {currentBookings.length === 0
+                ? 'No active bookings'
+                : currentBookings.some((b: any) => b.status === 'in_progress')
+                  ? `${currentBookings.filter((b: any) => b.status === 'in_progress').length} visit in progress · ${currentBookings.length} total active`
+                  : `${currentBookings.length} upcoming visit${currentBookings.length !== 1 ? 's' : ''}`}
+            </Text>
+          </View>
+        )}
 
         {/* CURRENT BOOKINGS */}
         {loadingBookings ? (
@@ -519,6 +563,7 @@ const CareRecipientDashboard = () => {
             const scheduledDate = booking.scheduled_date ? new Date(booking.scheduled_date) : new Date();
             const timeStr = scheduledDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
             const dateStr = scheduledDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            const statusDisplay = getBookingStatusDisplay(booking.status || 'pending');
 
             return (
               <View key={booking.id} style={styles.visitCard}>
@@ -527,7 +572,12 @@ const CareRecipientDashboard = () => {
                 </View>
 
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.visitTitle}>{serviceType}</Text>
+                  <View style={styles.visitTitleRow}>
+                    <Text style={styles.visitTitle}>{serviceType}</Text>
+                    <View style={[styles.statusBadge, { backgroundColor: statusDisplay.color + '20' }]}>
+                      <Text style={[styles.statusBadgeText, { color: statusDisplay.color }]}>{statusDisplay.label}</Text>
+                    </View>
+                  </View>
                   <Text style={styles.arriving}>● {dateStr} at {timeStr}</Text>
 
                   <View style={styles.caregiverRow}>
@@ -552,6 +602,8 @@ const CareRecipientDashboard = () => {
                     <TouchableOpacity
                       style={styles.completeBtn}
                       onPress={() => handleMarkCompleted(booking.id)}
+                      accessibilityLabel="Mark booking as completed"
+                      accessibilityRole="button"
                     >
                       <Icon name="check-circle" size={16} color="#fff" style={{ marginRight: 6 }} />
                       <Text style={styles.completeBtnText}>Mark as Completed</Text>
@@ -567,12 +619,14 @@ const CareRecipientDashboard = () => {
                             ? { latitude: booking.location.latitude, longitude: booking.location.longitude }
                             : { latitude: 17.3850, longitude: 78.4867 }; // Default: Hyderabad
 
-                        navigation.navigate('CaregiverMapScreen', {
+                        (navigation as any).navigate('CaregiverMapScreen', {
                           recipientLocation,
                           recipientName: user?.full_name || 'Care Recipient',
                           caregiverName: caregiver.full_name || 'Caregiver',
                         });
                       }}
+                      accessibilityLabel="Track caregiver"
+                      accessibilityRole="button"
                     >
                       <Text style={styles.trackText}>📍 Track</Text>
                     </TouchableOpacity>
@@ -606,6 +660,7 @@ export default CareRecipientDashboard;
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F6FAF5" },
+  scrollContent: { paddingBottom: 100 },
 
   // --- SWIPE BUTTON STYLES ---
   swipeContainer: {
@@ -630,14 +685,14 @@ const styles = StyleSheet.create({
     width: '90%', backgroundColor: '#fff', borderRadius: 24, padding: 24,
     shadowColor: "#000", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.25, shadowRadius: 10, elevation: 10,
   },
-  closeBtn: { position: 'absolute', right: 20, top: 20, zIndex: 1, padding: 4, backgroundColor: '#F3F4F6', borderRadius: 12 },
+  closeBtn: { position: 'absolute', right: 20, top: 20, zIndex: 1, minWidth: 48, minHeight: 48, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F3F4F6', borderRadius: 12 },
   modalHeader: { alignItems: 'center', marginBottom: 16 },
   modalIconBg: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#FEF2F2', justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
   modalTitle: { fontSize: 20, fontWeight: '800', color: '#111827' },
-  modalDesc: { textAlign: 'center', color: '#6B7280', marginBottom: 24, fontSize: 14, lineHeight: 20 },
+  modalDesc: { textAlign: 'center', color: '#6B7280', marginBottom: 24, fontSize: 16, lineHeight: 22 },
   inputContainer: { marginBottom: 16 },
-  inputLabel: { fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6 },
-  input: { backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 15, color: '#111827' },
+  inputLabel: { fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 6 },
+  input: { backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, color: '#111827' },
   phoneInputRow: { flexDirection: 'row', alignItems: 'center' },
   countryCode: { backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB', borderTopLeftRadius: 12, borderBottomLeftRadius: 12, paddingVertical: 13, paddingHorizontal: 12, justifyContent: 'center' },
   countryText: { fontSize: 15, fontWeight: '600', color: '#374151' },
@@ -648,13 +703,14 @@ const styles = StyleSheet.create({
   // --- GENERAL STYLES ---
   headerRow: {
     flexDirection: "row", justifyContent: "space-between", alignItems: "center",
-    marginBottom: 12, paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'android' ? 40 : 10,
-    marginTop: Platform.OS === 'android' ? 10 : 0,
+    marginBottom: 12,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    marginTop: 0,
   },
   menuButton: { padding: 12, marginRight: 8, minWidth: 44, minHeight: 44, justifyContent: 'center', alignItems: 'center' },
   headerCenter: { flex: 1 },
-  date: { color: GREEN, fontSize: 12, fontWeight: "600", letterSpacing: 1 },
+  date: { color: GREEN, fontSize: 14, fontWeight: "600", letterSpacing: 1 },
   heading: { fontSize: 26, fontWeight: "700", color: '#1A1A1A' },
   bell: {
     backgroundColor: "#fff", padding: 10, borderRadius: 12,
@@ -662,7 +718,7 @@ const styles = StyleSheet.create({
   },
   notificationDot: { position: 'absolute', top: 10, right: 10, width: 8, height: 8, borderRadius: 4, backgroundColor: 'red', borderWidth: 1, borderColor: '#fff' },
   menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-start', alignItems: 'flex-end', paddingTop: 60, paddingRight: 16 },
-  menuPanel: { backgroundColor: '#fff', borderRadius: 16, minWidth: 260, paddingVertical: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 8 },
+  menuPanel: { backgroundColor: '#fff', borderRadius: 16, minWidth: 260, maxWidth: '100%', marginHorizontal: 16, paddingVertical: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 8 },
   menuHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
   menuTitle: { fontSize: 18, fontWeight: '700', color: '#1F2937' },
   menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 16, gap: 12 },
@@ -693,7 +749,7 @@ const styles = StyleSheet.create({
   percentBadge: { position: "absolute", bottom: -4, right: -4, backgroundColor: GREEN, borderRadius: 12, paddingHorizontal: 5, paddingVertical: 1, borderWidth: 1.5, borderColor: '#fff' },
   percentText: { color: "#fff", fontSize: 10, fontWeight: "700" },
   name: { fontSize: 16, fontWeight: "700", color: '#1A1A1A' },
-  link: { color: GREEN, fontSize: 13, fontWeight: "600" },
+  link: { color: GREEN, fontSize: 14, fontWeight: "600" },
 
   requestBtn: {
     backgroundColor: GREEN, paddingVertical: 16, borderRadius: 18,
@@ -713,6 +769,8 @@ const styles = StyleSheet.create({
   serviceText: { fontSize: 12, fontWeight: '500', color: '#1A1A1A' },
   sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: 'center', marginBottom: 12, paddingHorizontal: 16 },
   sectionTitle: { fontSize: 18, fontWeight: "700", color: '#1A1A1A' },
+  statusSummaryWrap: { paddingHorizontal: 16, marginBottom: 12 },
+  statusSummaryText: { fontSize: 14, color: '#6B7280', fontWeight: '500' },
 
   visitCard: {
     backgroundColor: "#fff", borderRadius: 18, padding: 12,
@@ -720,8 +778,11 @@ const styles = StyleSheet.create({
     shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
   },
   mapBox: { width: 90, height: 90, borderRadius: 16, backgroundColor: "#DDEFE3", marginRight: 12, justifyContent: 'center', alignItems: 'center' },
+  visitTitleRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 2 },
   visitTitle: { fontWeight: "700", fontSize: 16, color: '#1A1A1A' },
-  arriving: { color: GREEN, marginTop: 2, marginBottom: 8, fontWeight: "600", fontSize: 13 },
+  statusBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  statusBadgeText: { fontSize: 12, fontWeight: '600' },
+  arriving: { color: GREEN, marginTop: 2, marginBottom: 8, fontWeight: "600", fontSize: 14 },
   caregiverRow: { flexDirection: "row", alignItems: "center" },
   smallAvatar: { width: 24, height: 24, borderRadius: 12, marginRight: 8 },
   smallAvatarPlaceholder: {
@@ -733,7 +794,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  caregiverText: { color: "#555", fontSize: 13 },
+  caregiverText: { color: "#555", fontSize: 14 },
   actionRow: { flexDirection: "row", marginTop: 12, alignItems: "center", gap: 8 },
   completeBtn: {
     backgroundColor: GREEN,

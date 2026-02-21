@@ -29,66 +29,62 @@ except ImportError:
 _connection_pool: Optional[psycopg2.pool.SimpleConnectionPool] = None
 
 
+_pool_error: Optional[str] = None  # Stores init error for deferred reporting
+
+
 def get_db_pool() -> psycopg2.pool.SimpleConnectionPool:
-    """Get or create database connection pool"""
-    global _connection_pool
-    
+    """Get or create database connection pool.
+
+    GRACEFUL DEGRADATION: If pool init fails, the error is stored and only raised
+    when a query is attempted. This lets the server start in degraded mode so that
+    Auth endpoints (Supabase client) remain usable even when direct DB is unavailable.
+    """
+    global _connection_pool, _pool_error
+
+    if _pool_error is not None:
+        raise DatabaseConnectionError(f"Database connection failed: {_pool_error}")
+
     if _connection_pool is None:
-        # Try to get DATABASE_URL from settings first, then environment
         database_url = None
         if settings and hasattr(settings, 'DATABASE_URL'):
             database_url = settings.DATABASE_URL
         if not database_url:
             database_url = os.getenv("DATABASE_URL")
-        
+
         try:
             if database_url:
-                # Use DATABASE_URL if provided (full connection string)
                 _connection_pool = psycopg2.pool.ThreadedConnectionPool(
-                    minconn=5,
-                    maxconn=20,
-                    dsn=database_url
+                    minconn=2, maxconn=10, dsn=database_url, connect_timeout=10
                 )
             else:
-                # Construct connection from individual components
                 supabase_url = os.getenv("SUPABASE_URL") or (settings.SUPABASE_URL if settings else None)
                 if not supabase_url:
-                    raise ValueError(
-                        "Missing configuration: Either DATABASE_URL or SUPABASE_URL "
-                        "environment variable is required for direct DB access."
-                    )
-                
-                # Extract project ref from SUPABASE_URL (e.g., https://xyz.supabase.co -> xyz)
+                    raise ValueError("Missing config: DATABASE_URL or SUPABASE_URL required.")
                 project_ref = supabase_url.replace("https://", "").replace("http://", "").split(".")[0]
-                
                 db_host = f"db.{project_ref}.supabase.co"
                 db_password = os.getenv("SUPABASE_DB_PASSWORD")
-                
                 if not db_password:
-                    raise ValueError(
-                        "Missing configuration: SUPABASE_DB_PASSWORD environment variable "
-                        "is required for direct DB access when DATABASE_URL is not provided."
-                    )
-                
+                    raise ValueError("Missing config: SUPABASE_DB_PASSWORD required.")
                 _connection_pool = psycopg2.pool.ThreadedConnectionPool(
-                    minconn=5,
-                    maxconn=20,
-                    host=db_host,
-                    database="postgres",
-                    user="postgres",
-                    password=db_password,
-                    port=5432,
-                    sslmode="require",
-                    connect_timeout=10
+                    minconn=2, maxconn=10,
+                    host=db_host, database="postgres",
+                    user="postgres", password=db_password,
+                    port=5432, sslmode="require", connect_timeout=10
                 )
         except Exception as e:
-            # Re-wrap as a more informative error
-            error_details = f"Failed to initialize database pool: {str(e)}"
-            if "translate host name" in str(e).lower():
-                error_details += " (Possible DNS/IPv6 issue. Consider using DATABASE_URL with Transaction Pooler on port 6543)"
-            raise DatabaseConnectionError(error_details) from e
-    
+            import sys
+            error_details = str(e)
+            if "translate host name" in error_details.lower() or "nodename" in error_details.lower():
+                error_details += " (DNS issue — set DATABASE_URL to Session Pooler URL from Supabase Dashboard)"
+            _pool_error = f"Failed to initialize database pool: {error_details}"
+            sys.stderr.write(f"[DB] WARNING: {_pool_error}\n")
+            sys.stderr.write("[DB] Server starting in degraded mode — Auth/Supabase-client endpoints still functional.\n")
+            sys.stderr.flush()
+            raise DatabaseConnectionError(_pool_error) from e
+
     return _connection_pool
+
+
 
 
 def get_db_connection():

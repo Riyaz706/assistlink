@@ -1,10 +1,14 @@
+import os
 import httpx
 import sys
 import uuid
 import time
 from datetime import datetime, timedelta
 
-BASE_URL = "http://localhost:8000"
+BASE_URL = (os.getenv("API_BASE_URL") or os.getenv("BACKEND_URL") or "").rstrip("/")
+if not BASE_URL:
+    print("ERROR: Set API_BASE_URL (or BACKEND_URL) to your backend URL. Do not use localhost for multi-device testing.")
+    sys.exit(1)
 
 def log(msg, type="INFO"):
     print(f"[{type}] {msg}")

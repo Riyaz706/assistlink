@@ -37,6 +37,7 @@ import EditProfileScreen from '../EditProfileScreen';
 import ChangePasswordScreen from '../ChangePasswordScreen';
 import SettingsScreen from '../SettingsScreen';
 import HelpSupportScreen from '../HelpSupportScreen';
+import NSSPortalScreen from '../NSSPortalScreen';
 import BookingsScreen from '../BookingsScreen';
 import BookingDetailScreen from '../BookingDetailScreen';
 
@@ -64,9 +65,9 @@ const AppNavigator = () => {
                     <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
                 </>
             ) : (
-                // Main Stack (Conditional based on role)
+                // Main Stack (Conditional based on role; fallback to care_recipient if role missing)
                 <>
-                    {user.role === 'caregiver' ? (
+                    {(user?.role ?? 'care_recipient') === 'caregiver' ? (
                         // Caregiver Stack
                         <>
                             <Stack.Screen name="CaregiverDashboard" component={CaregiverDashboard} />
@@ -100,6 +101,7 @@ const AppNavigator = () => {
                     <Stack.Screen name="ChatDetailsScreen" component={ChatDetailsScreen} />
                     <Stack.Screen name="Settings" component={SettingsScreen} />
                     <Stack.Screen name="HelpSupport" component={HelpSupportScreen} />
+                    <Stack.Screen name="NSSPortal" component={NSSPortalScreen} />
                     <Stack.Screen name="BookingsScreen" component={BookingsScreen} />
                     <Stack.Screen name="BookingDetailScreen" component={BookingDetailScreen} />
                 </>

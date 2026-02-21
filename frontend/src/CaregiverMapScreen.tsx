@@ -10,6 +10,7 @@ let MapView: any = null;
 let Marker: any = null;
 let Polyline: any = null;
 let PROVIDER_DEFAULT: any = null;
+let PROVIDER_GOOGLE: any = null;
 
 // Import expo-location (works on native platforms)
 if (Platform.OS !== 'web') {
@@ -24,41 +25,42 @@ if (Platform.OS !== 'web') {
 // Metro config will replace this with a mock in Expo Go
 try {
   const Maps = require('react-native-maps');
-  // Check if this is the mock (won't have native properties) or real maps
   if (Maps && Maps.MapView) {
     MapView = Maps.default || Maps.MapView || Maps;
     Marker = Maps.Marker;
     Polyline = Maps.Polyline;
     PROVIDER_DEFAULT = Maps.PROVIDER_DEFAULT;
+    PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE;
 
-    // Check if this is the mock: mock sets PROVIDER_DEFAULT to undefined
-    // Real react-native-maps would have a PROVIDER_DEFAULT value
+    // Mock sets PROVIDER_DEFAULT to undefined; real react-native-maps has it
     if (PROVIDER_DEFAULT === undefined && MapView && typeof MapView === 'function') {
-      // This is likely the mock - check if it's the mock by seeing if it's a simple function
-      // The mock returns null, so we'll use the fallback instead
       MapView = null;
       Marker = null;
       Polyline = null;
       PROVIDER_DEFAULT = undefined;
+      PROVIDER_GOOGLE = undefined;
     }
   }
 } catch (e) {
-  // If require fails, Metro should have replaced it with mock, but just in case:
   console.warn('react-native-maps not available, using fallback:', e);
 }
 
+// Flag: true when real map is available, false when showing fallback (Expo Go / web / mock)
+let IS_MAP_AVAILABLE = true;
+
 // Web fallback components - use if MapView is null or if we detected it's the mock
 if (!MapView) {
+  IS_MAP_AVAILABLE = false;
   MapView = ({ children, style, ...props }: any) => (
-    <View style={[style, { backgroundColor: '#EBF4EF', justifyContent: 'center', alignItems: 'center', padding: 20, minHeight: 400 }]}>
-      <Icon name="map-marker-off" size={64} color="#059669" />
+    <View style={[style, { flex: 1, backgroundColor: '#EBF4EF', justifyContent: 'center', alignItems: 'center', padding: 24 }]}>
+      <Icon name="map-marker-off" size={56} color="#059669" />
       <Text style={{ color: '#1F2937', fontSize: 18, fontWeight: '600', marginTop: 16, textAlign: 'center' }}>
-        Map View Unavailable
+        Map view unavailable
       </Text>
-      <Text style={{ color: '#6B7280', fontSize: 14, marginTop: 8, textAlign: 'center', paddingHorizontal: 20, lineHeight: 20 }}>
+      <Text style={{ color: '#6B7280', fontSize: 14, marginTop: 8, textAlign: 'center', paddingHorizontal: 24, lineHeight: 22 }}>
         {Platform.OS === 'web'
-          ? 'Map features are only available on mobile devices. Please use the Android app for full functionality.'
-          : 'Map features require a development build and are not available in Expo Go. Please build the app using "npx expo run:android" to enable map features.'}
+          ? 'Maps are available in the mobile app. You can open the destination in Google Maps below.'
+          : 'Use a development build (npx expo run:android) for in-app maps, or open in Google Maps below.'}
       </Text>
       {children}
     </View>
@@ -66,6 +68,7 @@ if (!MapView) {
   Marker = ({ children }: any) => <View>{children}</View>;
   Polyline = () => null;
   PROVIDER_DEFAULT = undefined;
+  PROVIDER_GOOGLE = undefined;
 }
 
 // Location fallback
@@ -500,20 +503,18 @@ export default function CaregiverMapScreen({ route, navigation }: CaregiverMapSc
     }
   };
 
-  // Open in external navigation app
+  // Open destination in external maps (works with or without caregiver location)
   const openInNavigation = () => {
-    if (caregiverLocation && recipientLocation) {
-      const url = Platform.select({
-        ios: `maps://app?daddr=${recipientLocation.latitude},${recipientLocation.longitude}&dirflg=d`,
-        android: `google.navigation:q=${recipientLocation.latitude},${recipientLocation.longitude}`,
-      });
-
-      if (url) {
-        Linking.openURL(url).catch(() => {
-          // Fallback to Google Maps web
-          Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${recipientLocation.latitude},${recipientLocation.longitude}`);
-        });
-      }
+    const url = Platform.select({
+      ios: `maps://app?daddr=${recipientLocation.latitude},${recipientLocation.longitude}&dirflg=d`,
+      android: `google.navigation:q=${recipientLocation.latitude},${recipientLocation.longitude}`,
+      default: `https://www.google.com/maps/dir/?api=1&destination=${recipientLocation.latitude},${recipientLocation.longitude}`,
+    });
+    const fallbackUrl = `https://www.google.com/maps/dir/?api=1&destination=${recipientLocation.latitude},${recipientLocation.longitude}`;
+    if (url && url !== fallbackUrl) {
+      Linking.openURL(url).catch(() => Linking.openURL(fallbackUrl));
+    } else {
+      Linking.openURL(fallbackUrl);
     }
   };
 
@@ -562,13 +563,54 @@ export default function CaregiverMapScreen({ route, navigation }: CaregiverMapSc
     return Math.min(100, Math.max(0, ((maxDistance - routeData.distance) / maxDistance) * 100));
   };
 
+  // When map is unavailable (Expo Go / web / mock), show a clear fallback with Open in Maps
+  if (!IS_MAP_AVAILABLE) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
+        <View style={[styles.unavailableTopBar, { paddingTop: insets.top + 8 }]}>
+          {navigation && (
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.modernControlButton} activeOpacity={0.7}>
+              <Icon name="arrow-left" size={22} color="#000" />
+            </TouchableOpacity>
+          )}
+          <View style={styles.unavailableTitleWrap}>
+            <Text style={styles.topBarTitle} numberOfLines={1}>Track to {recipientName}</Text>
+            <Text style={styles.topBarSubtitle}>Care recipient location</Text>
+          </View>
+          <View style={styles.topBarPlaceholder} />
+        </View>
+        <View style={styles.unavailableContent}>
+          <View style={styles.unavailableCard}>
+            <Icon name="map-marker-off" size={56} color={THEME.primary} />
+            <Text style={styles.unavailableHeading}>Map view unavailable</Text>
+            <Text style={styles.unavailableMessage}>
+              {Platform.OS === 'web'
+                ? 'In-app maps are available in the mobile app. Open the destination in Google Maps to get directions.'
+                : 'For in-app maps, build with "npx expo run:android". You can still open the destination in Google Maps.'}
+            </Text>
+            <TouchableOpacity
+              style={styles.unavailableButton}
+              onPress={openInNavigation}
+              activeOpacity={0.8}
+              accessibilityLabel="Open destination in Google Maps"
+              accessibilityRole="button"
+            >
+              <Icon name="navigation" size={22} color="#FFF" />
+              <Text style={styles.unavailableButtonText}>Open in Google Maps</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       {/* Map View */}
       <MapView
         ref={mapRef}
         style={styles.map}
-        provider={PROVIDER_DEFAULT}
+        provider={PROVIDER_GOOGLE ?? PROVIDER_DEFAULT}
         initialRegion={mapRegion}
         showsUserLocation={false} // We'll use custom markers
         showsMyLocationButton={false}
@@ -640,68 +682,22 @@ export default function CaregiverMapScreen({ route, navigation }: CaregiverMapSc
         )}
       </MapView>
 
-      {/* Error Messages */}
-      <ErrorBanner
-        error={error}
-        onDismiss={clearError}
-        onAction={error?.type === 'permission' ? handleOpenSettings : undefined}
-        actionLabel={error?.type === 'permission' ? 'Settings' : undefined}
-      />
-
-      {/* Bottom Info Card */}
-      <View style={styles.infoCard}>
-        {routeLoading && (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="small" color={THEME.primary} />
-            <Text style={styles.loadingText}>Calculating route...</Text>
-          </View>
-        )}
-
-        {routeData && !routeLoading && (
-          <>
-            {/* Distance */}
-            <View style={styles.infoRow}>
-              <Icon name="map-marker-distance" size={20} color={THEME.primary} />
-              <Text style={styles.infoLabel}>Distance:</Text>
-              <Text style={styles.infoValue}>{formatDistance(routeData.distance)}</Text>
-            </View>
-
-            {/* ETA */}
-            <View style={styles.infoRow}>
-              <Icon name="clock-outline" size={20} color={THEME.primary} />
-              <Text style={styles.infoLabel}>ETA:</Text>
-              <Text style={styles.infoValue}>{formatDuration(routeData.duration)}</Text>
-            </View>
-
-            {/* Status */}
-            <View style={styles.statusRow}>
-              <View style={[
-                styles.statusBadge,
-                routeData.distance < 50 && styles.statusBadgeArrived,
-                routeData.distance >= 50 && routeData.distance < 200 && styles.statusBadgeArriving,
-              ]}>
-                <Text style={styles.statusText}>
-                  {getProximityStatus(routeData.distance)}
-                </Text>
-              </View>
-            </View>
-          </>
-        )}
-
-        {!routeData && !routeLoading && !error && caregiverLocation && (
-          <Text style={styles.noRouteText}>Calculating route...</Text>
-        )}
-
-        {!caregiverLocation && locationPermission && (
-          <Text style={styles.noRouteText}>Getting your location...</Text>
-        )}
+      {/* Error Messages - below top bar */}
+      <View style={[styles.errorBannerWrapper, { top: insets.top + 56 }]}>
+        <ErrorBanner
+          error={error}
+          onDismiss={clearError}
+          onAction={error?.type === 'permission' ? handleOpenSettings : undefined}
+          actionLabel={error?.type === 'permission' ? 'Settings' : undefined}
+        />
       </View>
 
-      {/* Top Controls */}
+      {/* Top Bar: Back + Title + Live status */}
       <Animated.View
         style={[
           styles.topControls,
           {
+            top: insets.top + 8,
             opacity: cardOpacityAnim,
           }
         ]}
@@ -711,17 +707,27 @@ export default function CaregiverMapScreen({ route, navigation }: CaregiverMapSc
             onPress={() => navigation.goBack()}
             style={styles.modernControlButton}
             activeOpacity={0.7}
+            accessibilityLabel="Go back"
+            accessibilityRole="button"
           >
             <Icon name="arrow-left" size={22} color="#000" />
           </TouchableOpacity>
         )}
 
-        {/* Live Tracking Status */}
-        {isTracking && (
+        <View style={styles.topBarCenter}>
+          <Text style={styles.topBarTitle} numberOfLines={1}>
+            Track to {recipientName}
+          </Text>
+          <Text style={styles.topBarSubtitle}>Care recipient location</Text>
+        </View>
+
+        {isTracking ? (
           <View style={styles.trackingStatus}>
             <View style={styles.trackingDot} />
-            <Text style={styles.trackingText}>Live Tracking</Text>
+            <Text style={styles.trackingText}>Live</Text>
           </View>
+        ) : (
+          <View style={styles.topBarPlaceholder} />
         )}
       </Animated.View>
 
@@ -730,6 +736,7 @@ export default function CaregiverMapScreen({ route, navigation }: CaregiverMapSc
         style={[
           styles.mapControls,
           {
+            bottom: insets.bottom + 200,
             opacity: cardOpacityAnim,
           }
         ]}
@@ -789,6 +796,7 @@ export default function CaregiverMapScreen({ route, navigation }: CaregiverMapSc
         style={[
           styles.quickActions,
           {
+            top: insets.top + 120,
             opacity: cardOpacityAnim,
           }
         ]}
@@ -818,11 +826,12 @@ export default function CaregiverMapScreen({ route, navigation }: CaregiverMapSc
         </TouchableOpacity>
       </Animated.View>
 
-      {/* Bottom Info Card */}
+      {/* Bottom Info Card (single expandable card) */}
       <Animated.View
         style={[
           styles.modernInfoCard,
           {
+            bottom: insets.bottom + 16,
             maxHeight: slideAnim.interpolate({
               inputRange: [0, 1],
               outputRange: [110, 380],
@@ -1125,13 +1134,107 @@ const styles = StyleSheet.create({
   },
   topControls: {
     position: 'absolute',
-    top: 20,
-    left: 20,
-    right: 20,
+    left: 16,
+    right: 16,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     zIndex: 1000,
+  },
+  topBarCenter: {
+    flex: 1,
+    marginHorizontal: 12,
+    justifyContent: 'center',
+    minWidth: 0,
+  },
+  topBarTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: THEME.text,
+  },
+  topBarSubtitle: {
+    fontSize: 11,
+    color: THEME.subText,
+    marginTop: 2,
+  },
+  topBarPlaceholder: {
+    width: 44,
+    height: 44,
+  },
+  errorBannerWrapper: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    zIndex: 2000,
+  },
+  unavailableTopBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    backgroundColor: THEME.card,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.06)',
+  },
+  unavailableTitleWrap: {
+    flex: 1,
+    marginLeft: 12,
+    minWidth: 0,
+  },
+  unavailableContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  unavailableCard: {
+    backgroundColor: THEME.card,
+    borderRadius: 20,
+    padding: 28,
+    alignItems: 'center',
+    maxWidth: 340,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.06)',
+  },
+  unavailableHeading: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: THEME.text,
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  unavailableMessage: {
+    fontSize: 14,
+    color: THEME.subText,
+    marginTop: 10,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  unavailableButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: THEME.primary,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 14,
+    marginTop: 24,
+    gap: 10,
+    shadowColor: THEME.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  unavailableButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFF',
   },
   trackingStatus: {
     flexDirection: 'row',
@@ -1147,22 +1250,6 @@ const styles = StyleSheet.create({
     elevation: 5,
     borderWidth: 1,
     borderColor: 'rgba(16, 185, 129, 0.2)',
-  },
-  infoCard: {
-    position: 'absolute',
-    bottom: 20,
-    left: 20,
-    right: 20,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.05)',
   },
   trackingDot: {
     width: 10,
@@ -1184,8 +1271,7 @@ const styles = StyleSheet.create({
   },
   mapControls: {
     position: 'absolute',
-    right: 20,
-    bottom: 220,
+    right: 16,
     backgroundColor: THEME.cardGlass,
     borderRadius: 16,
     padding: 6,
@@ -1200,9 +1286,7 @@ const styles = StyleSheet.create({
   },
   quickActions: {
     position: 'absolute',
-    left: 20,
-    top: '50%',
-    transform: [{ translateY: -80 }],
+    left: 16,
     zIndex: 1000,
   },
   modernControlButton: {
@@ -1248,7 +1332,6 @@ const styles = StyleSheet.create({
   },
   modernInfoCard: {
     position: 'absolute',
-    bottom: 70,
     left: 16,
     right: 16,
     backgroundColor: '#FFFFFF',

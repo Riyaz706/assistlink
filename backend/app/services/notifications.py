@@ -54,7 +54,7 @@ async def create_notification(
             # Trigger push notification (async, don't wait)
             print(f"📤 Triggering push notification...", file=sys.stderr, flush=True)
             try:
-                push_result = await send_push_notification(user_id, title, body, data)
+                push_result = await send_push_notification(user_id, title, body, data, notification_type=notification_type)
                 print(f"Push notification result: {push_result}", file=sys.stderr, flush=True)
             except Exception as push_error:
                 print(f"⚠️ Push notification failed (but in-app notification created): {push_error}", file=sys.stderr, flush=True)
@@ -76,7 +76,8 @@ async def send_push_notification(
     user_id: str,
     title: str,
     body: str,
-    data: Optional[Dict[str, Any]] = None
+    data: Optional[Dict[str, Any]] = None,
+    notification_type: Optional[str] = None
 ) -> bool:
     """
     Send push notification to all user's active devices.
@@ -131,15 +132,21 @@ async def send_push_notification(
         if expo_tokens:
             print(f"Sending to {len(expo_tokens)} Expo Push Tokens...", file=sys.stderr, flush=True)
             try:
+                is_emergency = notification_type == "emergency"
+                data_payload = data or {}
+                if is_emergency:
+                    data_payload = {**data_payload, "notification_type": "emergency"}
+                # Expo requires all data values to be strings
+                data_str = {k: json.dumps(v) if not isinstance(v, str) else v for k, v in data_payload.items()}
                 message = {
                     "to": expo_tokens,
                     "sound": "default",
                     "title": title,
                     "body": body,
-                    "data": data or {},
+                    "data": data_str,
                     "priority": "high",
                     "badge": 1,
-                    "channelId": "default",
+                    "channelId": "emergency" if is_emergency else "default",
                 }
                 
                 async with httpx.AsyncClient() as client:
@@ -210,6 +217,9 @@ async def send_push_notification(
                     # Send loop for native tokens
                     data_payload = data or {}
                     data_payload["type"] = data.get("type", "general") if data else "general"
+                    if notification_type:
+                        data_payload["notification_type"] = notification_type
+                    is_emergency = notification_type == "emergency"
 
                     for device in native_tokens:
                         device_token = device["device_token"]
@@ -223,11 +233,16 @@ async def send_push_notification(
                                     apns=messaging.APNSConfig(payload=messaging.APNSPayload(aps=messaging.Aps(sound="default", badge=1)))
                                 )
                             elif platform == "android":
+                                android_notif = messaging.AndroidNotification(
+                                    sound="default",
+                                    channel_id="emergency" if is_emergency else "default",
+                                    default_vibrate_timings=True,
+                                )
                                 msg = messaging.Message(
                                     token=device_token,
                                     notification=messaging.Notification(title=title, body=body),
                                     data={str(k): str(v) for k, v in data_payload.items()},
-                                    android=messaging.AndroidConfig(priority="high", notification=messaging.AndroidNotification(sound="default", channel_id="default"))
+                                    android=messaging.AndroidConfig(priority="high", notification=android_notif)
                                 )
                             else: # web
                                 msg = messaging.Message(
@@ -299,13 +314,22 @@ async def notify_video_call_accepted(user_id: str, other_party_name: str, video_
 
 
 async def notify_video_call_status_change(user_id: str, other_party_name: str, video_call_id: str, status: str):
-    """Notify user about video call status updates (e.g., declined)."""
-    status_text = "accepted" if status == "accepted" else "declined"
+    """Notify user about video call status updates."""
+    status_map = {
+        "accepted": "accepted",
+        "rejected": "declined",
+        "cancelled": "cancelled",
+        "in_progress": "started",
+        "completed": "ended",
+        "missed": "missed"
+    }
+    action_text = status_map.get(status, status)
+    
     return await create_notification(
         user_id=user_id,
         notification_type="video_call",
         title="Video Call Update",
-        body=f"{other_party_name} has {status_text} the video call request",
+        body=f"{other_party_name} has {action_text} the video call",
         data={
             "video_call_id": video_call_id,
             "status": status,
@@ -454,10 +478,10 @@ async def notify_payment_success(user_id: str, amount: float, payment_id: str, o
     """Notify about successful payment"""
     if is_sender:
         title = "Payment Confirmed"
-        body = f"Payment of ${amount:.2f} to {other_party_name} processed successfully"
+        body = f"Payment of ₹{amount:.2f} to {other_party_name} processed successfully"
     else:
         title = "Payment Received"
-        body = f"You received ${amount:.2f} from {other_party_name}"
+        body = f"You received ₹{amount:.2f} from {other_party_name}"
     
     return await create_notification(
         user_id=user_id,
@@ -479,7 +503,7 @@ async def notify_payment_received(caregiver_id: str, amount: float, care_recipie
         user_id=caregiver_id,
         notification_type="payment",
         title="Payment Received",
-        body=f"You received ${amount:.2f} from {care_recipient_name}",
+        body=f"You received ₹{amount:.2f} from {care_recipient_name}",
         data={
             "payment_id": payment_id,
             "amount": amount,

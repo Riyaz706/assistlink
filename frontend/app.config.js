@@ -38,6 +38,7 @@ export default {
         'android.permission.CAMERA',
         'android.permission.RECORD_AUDIO',
         'android.permission.MODIFY_AUDIO_SETTINGS',
+        'android.permission.POST_NOTIFICATIONS',
       ],
       usesCleartextTraffic: true, // Allow http:// for local dev backend
       config: {
@@ -49,6 +50,7 @@ export default {
     plugins: [
       ['expo-camera', { cameraPermission: 'Allow AssistLink to access your camera for video calls.' }],
       ['expo-av', { microphonePermission: 'Allow AssistLink to access your microphone for video calls.' }],
+      ['expo-notifications', { defaultChannel: 'default' }],
       'expo-font'
     ],
     web: { favicon: './assets/favicon.png' },

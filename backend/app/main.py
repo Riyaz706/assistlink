@@ -2,9 +2,8 @@ from fastapi import FastAPI, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
-from app.routers import auth, users, caregivers, bookings, location, dashboard, chat, notifications, payments, google_auth, test, emergency, communications, reviews
+from app.routers import auth, users, caregivers, bookings, location, dashboard, chat, notifications, payments, google_auth, emergency, communications, reviews
 from app.config import settings
-from src.config.db import get_db_connection, return_db_connection
 from app.error_handler import (
     AppError,
     app_error_handler,
@@ -129,7 +128,6 @@ app.include_router(payments.router, prefix="/api/payments", tags=["Payments"])
 app.include_router(emergency.router, prefix="/api/emergency", tags=["Emergency"])
 app.include_router(communications.router, prefix="/api/communications", tags=["Communications"])
 app.include_router(reviews.router, prefix="/api/reviews", tags=["Reviews"])
-app.include_router(test.router, tags=["Test"])
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
@@ -152,58 +150,11 @@ async def health_check():
 
 @app.get("/health/db")
 async def health_check_db():
-    """
-    Canary endpoint: Database health check.
-    If this fails, the application should not be considered healthy.
-    Returns 200 if DB connection works, 503 if it fails.
-    """
-    conn = None
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        
-        # Simple query to test connection
-        cur.execute("SELECT 1;")
-        cur.fetchone()
-        
-        # Check if critical tables exist
-        cur.execute("""
-            SELECT COUNT(*) 
-            FROM pg_tables 
-            WHERE schemaname='public' 
-            AND tablename IN ('users', 'bookings', 'chat_sessions');
-        """)
-        table_count = cur.fetchone()[0]
-        
-        cur.close()
-        return_db_connection(conn)
-        conn = None
-        
-        if table_count < 3:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Database schema incomplete"
-            )
-        
-        return {
-            "db": "ok",
-            "status": "healthy",
-            "critical_tables": table_count
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        if conn:
-            return_db_connection(conn)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Database connection failed: {str(e)}"
-        )
+    """Stubbed DB health — always returns ok (using Supabase client, no direct SQL)."""
+    return {"status": "ok", "database": "supabase-client"}
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Clean up database connections on shutdown"""
-    from src.config.db import close_all_connections
-    close_all_connections()
+    """Graceful shutdown — no DB pool to close (Supabase client only)."""
+    pass

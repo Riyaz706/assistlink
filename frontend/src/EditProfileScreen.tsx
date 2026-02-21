@@ -458,7 +458,7 @@ export default function EditProfileScreen({ navigation, route }: any) {
                 </View>
 
                 <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
-                  <Text style={styles.label}>Hourly Rate ($)</Text>
+                  <Text style={styles.label}>Hourly Rate (₹)</Text>
                   <TextInput
                     style={styles.input}
                     value={hourlyRate}

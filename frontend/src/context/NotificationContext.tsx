@@ -62,9 +62,9 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
             // Fetch both regular bookings AND video call requests
             const [bookings, videoCalls] = await Promise.all([
                 api.getDashboardBookings({
-                    status: 'pending,accepted,in_progress',
-                    upcoming_only: true, // Filter out past bookings
-                    limit: 10
+                    status: 'requested,pending,accepted,in_progress', // include requested so caregiver sees new requests
+                    upcoming_only: true, // Filter out past bookings (includes undated pending)
+                    limit: 50
                 }),
                 api.getDashboardVideoCalls({ limit: 100 })
             ]);
@@ -127,8 +127,14 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
                 };
             });
 
-            // Transform video calls to assignments
-            const videoCallAssignments: Assignment[] = (Array.isArray(videoCalls) ? videoCalls : []).map((videoCall: any) => {
+            // Transform video calls to assignments (only upcoming / pending)
+            const upcomingVideoCalls = (Array.isArray(videoCalls) ? videoCalls : []).filter((vc: any) => {
+                const status = (vc.status || '').toLowerCase();
+                if (!['pending', 'accepted', 'in_progress'].includes(status)) return false;
+                if (!vc.scheduled_time) return true;
+                return new Date(vc.scheduled_time) >= new Date();
+            });
+            const videoCallAssignments: Assignment[] = upcomingVideoCalls.map((videoCall: any) => {
                 const careRecipient = videoCall.care_recipient || {};
 
                 // Format date and time
@@ -169,8 +175,15 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
                 };
             });
 
-            // Merge both arrays
-            const allAssignments = [...bookingAssignments, ...videoCallAssignments];
+            // Merge and sort by date (soonest first); items with no date go last
+            const allAssignments = [...bookingAssignments, ...videoCallAssignments].sort((a, b) => {
+                const getSortKey = (item: Assignment) => {
+                    const data = item.bookingData;
+                    const dateStr = data?.scheduled_date || data?.scheduled_time;
+                    return dateStr ? new Date(dateStr).getTime() : Number.MAX_SAFE_INTEGER;
+                };
+                return getSortKey(a) - getSortKey(b);
+            });
 
             console.log('[NotificationContext] Assignments updated. Count:', allAssignments.length);
 
@@ -255,10 +268,10 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
         if (user && (user as any).role === 'caregiver') {
             loadBookings();
 
-            // Polling every 5 seconds
+            // Polling every 30 seconds (reduced from 5s to avoid request storm and timeouts)
             const intervalId = setInterval(() => {
                 loadBookings(true); // Silent refresh
-            }, 5000);
+            }, 30000);
 
             return () => clearInterval(intervalId);
         } else {

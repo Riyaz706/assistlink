@@ -155,6 +155,8 @@ const CaregiverDashboard = ({ navigation }: { navigation: any }) => {
         <TouchableOpacity
           style={styles.bellBtn}
           onPress={() => navigation.navigate('Notifications')}
+          accessibilityLabel="View notifications"
+          accessibilityRole="button"
         >
           <Icon name="bell-outline" size={24} color="#333" />
           <View style={styles.bellBadge} />
@@ -183,23 +185,6 @@ const CaregiverDashboard = ({ navigation }: { navigation: any }) => {
       )}
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Debug Button */}
-        <TouchableOpacity
-          style={{ backgroundColor: '#EEE', padding: 10, borderRadius: 8, marginBottom: 15, alignItems: 'center' }}
-          onPress={async () => {
-            try {
-              const res = await api.createTestNotification();
-              console.log('Test notification created:', res);
-              Alert.alert("Success", "Test notification created. Check the bell icon!");
-              refresh(true);
-            } catch (e: any) {
-              handleError(e, 'test-notification');
-            }
-          }}
-        >
-          <Text style={{ fontWeight: 'bold', color: '#666' }}>DEBUG: Send Test Notification</Text>
-        </TouchableOpacity>
-
         {/* Stats */}
         <Text style={styles.sectionTitle}>Overview</Text>
         <View style={styles.statsRow}>
@@ -223,54 +208,79 @@ const CaregiverDashboard = ({ navigation }: { navigation: any }) => {
           </View>
         </View>
 
-        {/* Upcoming */}
+        {/* Upcoming Assignments */}
         <View style={styles.sectionHeaderRow}>
           <Text style={styles.sectionTitle}>Upcoming Assignments</Text>
-          <TouchableOpacity onPress={() => navigation.navigate('ScheduleScreen2')}>
-            <Text style={styles.seeAllText}>See All</Text>
-          </TouchableOpacity>
+          <View style={styles.sectionHeaderActions}>
+            <TouchableOpacity
+              onPress={() => refresh(false)}
+              disabled={loadingAssignments}
+              accessibilityLabel="Refresh upcoming assignments"
+              accessibilityRole="button"
+            >
+              <Icon name="refresh" size={20} color={loadingAssignments ? '#999' : THEME.primary} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('ScheduleScreen2')}
+              accessibilityLabel="See all assignments in schedule"
+              accessibilityRole="button"
+            >
+              <Text style={styles.seeAllText}>See All</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {loadingAssignments ? (
-          <View style={{ padding: 20, alignItems: 'center' }}>
+          <View style={styles.upcomingEmpty} accessibilityLabel="Loading upcoming assignments">
             <ActivityIndicator size="small" color={THEME.primary} />
+            <Text style={styles.upcomingEmptyText}>Loading…</Text>
           </View>
         ) : upcomingAssignments.length === 0 ? (
-          <View style={{ padding: 20, alignItems: 'center' }}>
-            <Text style={{ color: THEME.textGray, fontSize: 14 }}>No upcoming assignments</Text>
+          <View style={styles.upcomingEmpty}>
+            <Icon name="calendar-blank-outline" size={32} color="#9CA3AF" />
+            <Text style={styles.upcomingEmptyText}>No upcoming assignments</Text>
+            <Text style={styles.upcomingEmptySubtext}>New bookings and video calls will appear here</Text>
           </View>
         ) : (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalList}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.horizontalList}
+            accessibilityLabel={`${upcomingAssignments.length} upcoming assignment(s). Swipe to see more.`}
+          >
             {upcomingAssignments.map((item) => (
               <TouchableOpacity
                 key={item.id}
                 style={styles.assignmentCard}
                 onPress={() => navigateToDetails(item)}
+                activeOpacity={0.7}
+                accessibilityLabel={`${item.service} with ${item.clientName}, ${item.status}. ${item.time || ''}. Tap for details.`}
+                accessibilityRole="button"
               >
                 <View style={styles.assignmentHeader}>
                   {item.image ? (
-                    <Image source={{ uri: item.image }} style={styles.clientAvatar} />
+                    <Image source={{ uri: item.image }} style={styles.clientAvatar} accessibilityIgnoresInvertColors />
                   ) : (
                     <View style={styles.clientAvatarPlaceholder}>
                       <Icon name="account" size={20} color="#6B7280" />
                     </View>
                   )}
                   <View style={styles.assignmentInfo}>
-                    <Text style={styles.clientName}>{item.clientName}</Text>
-                    <Text style={styles.serviceText}>{item.service}</Text>
+                    <Text style={styles.clientName} numberOfLines={1}>{item.clientName}</Text>
+                    <Text style={styles.serviceText} numberOfLines={1}>{item.service}</Text>
                   </View>
                   <View style={styles.confirmedBadge}>
-                    <Text style={styles.confirmedText}>{item.status}</Text>
+                    <Text style={styles.confirmedText}>{item.status || 'Pending'}</Text>
                   </View>
                 </View>
                 <View style={styles.divider} />
                 <View style={styles.assignmentDetailRow}>
                   <Icon name="clock-outline" size={14} color="#666" />
-                  <Text style={styles.detailText}>{item.time}</Text>
+                  <Text style={styles.detailText} numberOfLines={1}>{item.time || 'Date not set'}</Text>
                 </View>
                 <View style={styles.assignmentDetailRow}>
                   <Icon name="map-marker" size={14} color="#666" />
-                  <Text style={styles.detailText}>{item.address}</Text>
+                  <Text style={styles.detailText} numberOfLines={2}>{item.address || 'Location not specified'}</Text>
                 </View>
               </TouchableOpacity>
             ))}
@@ -354,7 +364,7 @@ const styles = StyleSheet.create({
   },
   welcomeText: { fontSize: 12, color: '#666' },
   userName: { fontSize: 18, fontWeight: '800', color: '#000' },
-  bellBtn: { padding: 8 },
+  bellBtn: { minWidth: 48, minHeight: 48, justifyContent: 'center', alignItems: 'center', padding: 8 },
   bellBadge: { position: 'absolute', top: 8, right: 8, width: 8, height: 8, borderRadius: 4, backgroundColor: 'red' },
 
   sectionTitle: { fontSize: 18, fontWeight: '800', marginBottom: 15, color: '#333' },
@@ -368,9 +378,13 @@ const styles = StyleSheet.create({
   statSub: { color: '#999', fontSize: 12, marginLeft: 6, marginBottom: 4 },
 
   sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
-  seeAllText: { color: THEME.primary, fontWeight: '700' },
+  sectionHeaderActions: { flexDirection: 'row', alignItems: 'center' },
+  seeAllText: { color: THEME.primary, fontWeight: '700', marginLeft: 12 },
 
   horizontalList: { overflow: 'visible', marginBottom: 25 },
+  upcomingEmpty: { padding: 24, alignItems: 'center', backgroundColor: '#FFF', borderRadius: 16, marginBottom: 8 },
+  upcomingEmptyText: { color: THEME.textGray, fontSize: 14, marginTop: 8 },
+  upcomingEmptySubtext: { color: '#9CA3AF', fontSize: 12, marginTop: 4 },
   assignmentCard: { backgroundColor: '#FFF', width: width * 0.75, padding: 15, borderRadius: 16, marginRight: 15, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5 },
   assignmentHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
   clientAvatar: { width: 40, height: 40, borderRadius: 20, marginRight: 10 },

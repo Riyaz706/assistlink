@@ -6,7 +6,7 @@ import React, {
   ReactNode,
 } from "react";
 import * as SecureStore from "expo-secure-store";
-import { api, setAccessToken, setRefreshToken } from "../api/client";
+import { api, apiConfigReady, setAccessToken, setRefreshToken } from "../api/client";
 import { Platform } from "react-native";
 
 type User = any;
@@ -101,32 +101,48 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     (async () => {
       console.log("AuthContext: Restoring authentication state...");
       try {
+        await apiConfigReady; // use saved Backend URL override if set (so IP change works without rebuild)
         const token = await getToken();
         if (token) {
           console.log("AuthContext: Token found, validating with backend...");
           setAccessTokenState(token);
           setAccessToken(token);
-          try {
-            const me = await api.me();
-            if (isMounted) {
-              console.log("AuthContext: User profile restored:", (me as any)?.email || (me as any)?.full_name || "Unknown");
-              setUser(me as any);
-            }
-          } catch (meError: any) {
-            // If token is invalid (401), clear it
-            const errorMsg = meError?.message || '';
-            console.error("AuthContext: Failed to fetch user profile:", errorMsg);
-            if (isMounted) {
-              if (meError.statusCode === 401 || errorMsg.includes('401') || errorMsg.includes('Not authenticated') || errorMsg.includes('Unauthorized')) {
-                console.log("AuthContext: Token expired or invalid - clearing...");
-                await clearToken();
-                setAccessTokenState(null);
-                setAccessToken(null);
-                setUser(null);
-              } else {
-                // For other errors (network, etc.), keep the token but log the error
-                console.warn("AuthContext: Failed to fetch user profile, but keeping token (might be network issue):", meError);
-                // Don't set user, but don't clear token either - might be a temporary network issue
+          const isTimeoutOrNetwork = (e: any) =>
+            e?.code === 'TIMEOUT' || e?.statusCode === 408 ||
+            (e?.message && /timeout|network|connection|fetch/i.test(e.message || ''));
+          let meError: any = null;
+          for (let attempt = 1; attempt <= 2 && isMounted; attempt++) {
+            try {
+              const me = await api.me();
+              if (isMounted) {
+                console.log("AuthContext: User profile restored:", (me as any)?.email || (me as any)?.full_name || "Unknown");
+                setUser(me as any);
+              }
+              meError = null;
+              break;
+            } catch (err: any) {
+              meError = err;
+              const errorMsg = meError?.message || '';
+              console.error("AuthContext: Failed to fetch user profile:", errorMsg);
+              if (isMounted) {
+                if (meError.statusCode === 401 || errorMsg.includes('401') || errorMsg.includes('Not authenticated') || errorMsg.includes('Unauthorized')) {
+                  console.log("AuthContext: Token expired or invalid - clearing...");
+                  await clearToken();
+                  setAccessTokenState(null);
+                  setAccessToken(null);
+                  setUser(null);
+                  break;
+                }
+                if (attempt === 1 && isTimeoutOrNetwork(meError)) {
+                  console.log("AuthContext: Retrying /api/auth/me in 2s...");
+                  await new Promise((r) => setTimeout(r, 2000));
+                  continue;
+                }
+                console.warn("AuthContext: Failed to fetch user profile (keeping token):", meError?.message || meError);
+                if (isMounted && isTimeoutOrNetwork(meError)) {
+                  setUser({ _needsRefresh: true, role: "care_recipient" } as any);
+                }
+                break;
               }
             }
           }
@@ -157,45 +173,64 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const login = async (email: string, password: string) => {
     console.log("AuthContext: Starting login...");
-    try {
-      const res = await api.login({ email, password });
-      const token = res.access_token;
-      const refreshToken = res.refresh_token;
-      console.log("AuthContext: Login successful, token received");
-
-      await setToken(token); // Update AuthContext's local persistence (legacy but kept for safety)
-      // Update client.ts persistence
-      if (Platform.OS === 'web') {
-        window.localStorage.setItem('assistlink_token', token);
-      } else {
-        await SecureStore.setItemAsync('assistlink_token', token);
-      }
-
-      setAccessTokenState(token);
-      setAccessToken(token);
-
-      if (refreshToken) {
-        await setRefreshToken(refreshToken);
-      }
-
+    await apiConfigReady;
+    const isTimeoutOrNetwork = (e: any) =>
+      e?.code === "TIMEOUT" || e?.statusCode === 408 ||
+      (e?.message && /timeout|network|connection|fetch/i.test(e?.message || ""));
+    let lastError: any;
+    for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        const me = await api.me();
-        console.log("AuthContext: User profile fetched:", (me as any)?.email || (me as any)?.full_name || "Unknown");
-        setUser(me as any);
-      } catch (meError: any) {
-        console.error("AuthContext: Failed to fetch user profile after login:", meError);
-        setUser({ email, id: res.user?.id || null });
-        throw new Error("Login successful but failed to load profile. Please try again.");
-      }
+        const res = await api.login({ email, password });
+        lastError = null;
+        const token = res?.access_token;
+        const refreshToken = res?.refresh_token;
+        if (!token) {
+          throw new Error("Login failed: No token received from server. Please try again.");
+        }
+        console.log("AuthContext: Login successful, token received");
+
+        await setToken(token);
+        setAccessTokenState(token);
+        setAccessToken(token);
+
+        const readBack = await getToken();
+        if (readBack !== token) {
+          console.warn("AuthContext: Token read-back failed - session may not persist after app restart.");
+          throw new Error("Could not save login. Please try again or check app storage permissions.");
+        }
+
+        if (refreshToken) {
+          await setRefreshToken(refreshToken);
+        }
+
+        try {
+          const me = await api.me();
+          console.log("AuthContext: User profile fetched:", (me as any)?.email || (me as any)?.full_name || "Unknown");
+          setUser(me as any);
+        } catch (meError: any) {
+          console.error("AuthContext: Failed to fetch user profile after login:", meError);
+          setUser({ email, id: res.user?.id || null, role: (res.user as any)?.role || "care_recipient" });
+          throw new Error("Login successful but failed to load profile. Please try again.");
+        }
+        return;
     } catch (error: any) {
-      console.error("AuthContext: Login error:", error);
-      await clearToken();
-      setAccessTokenState(null);
-      setAccessToken(null);
-      await setRefreshToken(null);
-      setUser(null);
-      throw error;
+      lastError = error;
+      if (attempt === 1 && isTimeoutOrNetwork(error)) {
+        console.log("AuthContext: Login timeout/network error, retrying in 2s...");
+        await new Promise((r) => setTimeout(r, 2000));
+        continue;
+      }
+      break;
     }
+    }
+    const error = lastError;
+    console.error("AuthContext: Login error:", error);
+    await clearToken();
+    setAccessTokenState(null);
+    setAccessToken(null);
+    await setRefreshToken(null);
+    setUser(null);
+    throw error;
   };
 
   const googleLogin = async (idToken: string, role: "care_recipient" | "caregiver" = "care_recipient") => {
@@ -263,18 +298,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  useEffect(() => {
+    const u = user as any;
+    if (u?._needsRefresh) {
+      refreshUser();
+    }
+  }, [(user as any)?._needsRefresh]);
+
   const logout = async () => {
     try {
       console.log("AuthContext: Logging out...");
 
       // Clear state first to trigger immediate navigation
-      // This ensures the UI responds immediately
       setAccessTokenState(null);
       setAccessToken(null);
       setUser(null);
 
-      // Then clear token in background (non-blocking)
-      // Then clear token in background (non-blocking)
       try {
         await clearToken();
         await setRefreshToken(null);
@@ -285,11 +324,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.log("AuthContext: Logout complete - state cleared");
     } catch (error) {
       console.error("AuthContext: Error during logout:", error);
-      // Force state clear even if there's an error
       setAccessTokenState(null);
       setAccessToken(null);
       setUser(null);
-      setRefreshToken(null);
+      try {
+        await setRefreshToken(null);
+      } catch (_) {}
     }
   };
 
@@ -337,10 +377,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   );
 };
 
+const authFallback: AuthContextType = {
+  user: null,
+  accessToken: null,
+  loading: false,
+  login: async () => {},
+  googleLogin: async () => {},
+  logout: async () => {},
+  refreshUser: async () => {},
+  resetPassword: async () => {},
+  updatePassword: async () => {},
+};
+
 export const useAuth = () => {
   const ctx = useContext(AuthContext);
-  if (!ctx) {
-    throw new Error("useAuth must be used within AuthProvider");
+  if (ctx === undefined) {
+    return authFallback;
   }
   return ctx;
 };

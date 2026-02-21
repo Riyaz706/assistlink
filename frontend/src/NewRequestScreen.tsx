@@ -312,7 +312,7 @@ const NewRequestScreen = ({ navigation }: any) => {
       dailyDuration: dailyDuration,
       locationText,
       location: selectedLocation, // Include coordinates
-      urgencyLevel: activeTab === 'urgent' ? 'high' : 'standard', // simple mapping
+      urgencyLevel: activeTab === 'urgent' ? 'high' : 'medium',
       specificRequirements: activeTab === 'urgent' ? selectedUrgency : additionalNotes, // Map urgency type or notes
       additionalNotes: additionalNotes // Pass raw notes too
     };

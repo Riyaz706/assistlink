@@ -12,10 +12,9 @@ def generate_video_call_url(provider: Optional[str] = None) -> str:
     
     if provider == "jitsi":
         return f"https://meet.jit.si/{room_id}"
-    elif provider == "twilio":
-        # The app uses Twilio Video SDK and requests a token based on booking_id.
-        # This URL is just a placeholder for the database record.
-        return "Twilio Video - Join via App"
+    elif provider == "webrtc" or provider == "twilio":
+        # Video calls use WebRTC with Supabase signaling; join via app.
+        return "WebRTC - Join via App"
     else:
         # Fallback to Jitsi
         return f"https://meet.jit.si/{room_id}"

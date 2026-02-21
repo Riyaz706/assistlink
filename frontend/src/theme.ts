@@ -73,4 +73,36 @@ export const accessibility = {
   contrastBorderWidth: 2,
 };
 
-export default { colors, typography, spacing, borderRadius, accessibility };
+/** High-contrast color set for accessibility mode */
+export const highContrastColors = {
+  ...colors,
+  primary: '#1D4ED8',
+  textPrimary: '#111827',
+  textSecondary: '#374151',
+  border: '#9CA3AF',
+  background: '#F3F4F6',
+  card: '#FFFFFF',
+};
+
+/**
+ * Typography scale for large-text mode (multiplier for base sizes).
+ */
+export function getTypographyScale(largeText: boolean): Record<keyof typeof typography, number | string> {
+  const scale = largeText ? 1.2 : 1;
+  return {
+    ...typography,
+    minBodySize: largeText ? 18 : 16,
+    headingLarge: Math.round(typography.headingLarge * scale),
+    headingMedium: Math.round(typography.headingMedium * scale),
+    headingSmall: Math.round(typography.headingSmall * scale),
+    body: Math.round(typography.body * scale),
+    bodySmall: Math.round(typography.bodySmall * scale),
+    caption: Math.round(typography.caption * scale),
+    weightBold: typography.weightBold,
+    weightSemiBold: typography.weightSemiBold,
+    weightMedium: typography.weightMedium,
+    weightNormal: typography.weightNormal,
+  };
+}
+
+export default { colors, typography, spacing, borderRadius, accessibility, highContrastColors, getTypographyScale };

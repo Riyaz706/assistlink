@@ -46,7 +46,7 @@ const MOCK_APPOINTMENT = {
   service: 'Initial Assessment',
   location: '123 Maple Ave',
   time: '09:00 AM',
-  pay: '$45.00',
+  pay: '₹45.00',
   date: 'Oct 24, 2023',
   image: 'https://i.pravatar.cc/150?u=fake'
 };

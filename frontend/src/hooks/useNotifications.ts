@@ -1,18 +1,25 @@
 import { useState, useEffect, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
-import { Platform } from 'react-native';
+import { Platform, Vibration } from 'react-native';
 import { api } from '../api/client';
 
-// Configure notification behavior
+// Configure notification behavior: every notification shows with sound and vibration
 Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-        shouldShowAlert: true,
-        shouldPlaySound: true,
-        shouldSetBadge: true,
-        shouldShowBanner: true,
-        shouldShowList: true,
-    }),
+    handleNotification: async (notification) => {
+        const isEmergency = notification.request.content.data?.notification_type === 'emergency' ||
+            notification.request.content.data?.action === 'view_emergency';
+        return {
+            shouldShowAlert: true,
+            shouldPlaySound: true,
+            shouldSetBadge: true,
+            shouldShowBanner: true,
+            shouldShowList: true,
+            ...(Platform.OS === 'android' && {
+                priority: isEmergency ? Notifications.AndroidNotificationPriority.MAX : Notifications.AndroidNotificationPriority.HIGH,
+            }),
+        };
+    },
 });
 
 export function useNotifications(navigation?: any) {
@@ -40,10 +47,18 @@ export function useNotifications(navigation?: any) {
             }
         });
 
-        // Listen for notifications while app is in foreground
+        // Listen for notifications while app is in foreground (sound + vibration for every notification)
         notificationListener.current = Notifications.addNotificationReceivedListener(notification => {
             console.log('📬 Notification received:', notification);
             setNotification(notification);
+            if (Platform.OS === 'web') return;
+            const data = notification.request.content.data as Record<string, unknown> | undefined;
+            const isEmergency = data?.notification_type === 'emergency' || data?.action === 'view_emergency';
+            if (isEmergency) {
+                Vibration.vibrate([0, 500, 200, 500, 200, 500]);
+            } else {
+                Vibration.vibrate([0, 100, 50, 100]);
+            }
         });
 
         // Handle notification taps
@@ -100,13 +115,23 @@ async function registerForPushNotificationsAsync() {
         return null;
     }
 
-    // Android-specific channel configuration
+    // Android-specific channels: HIGH/MAX importance so notifications show as heads-up (popup)
     if (Platform.OS === 'android') {
         await Notifications.setNotificationChannelAsync('default', {
-            name: 'default',
-            importance: Notifications.AndroidImportance.MAX,
+            name: 'Notifications',
+            importance: Notifications.AndroidImportance.MAX, // MAX = pop on screen (heads-up)
             vibrationPattern: [0, 250, 250, 250],
             lightColor: '#059669',
+            sound: 'default',
+            enableVibration: true,
+        });
+        await Notifications.setNotificationChannelAsync('emergency', {
+            name: 'Emergency Alerts',
+            importance: Notifications.AndroidImportance.MAX,
+            vibrationPattern: [0, 500, 200, 500, 200, 500],
+            lightColor: '#DC2626',
+            sound: 'default',
+            enableVibration: true,
         });
     }
 
@@ -151,10 +176,9 @@ function handleNotificationAction(data: any, navigation?: any) {
 
         case 'view_emergency':
             if (data.emergency_id || data.care_recipient_id) {
-                // Navigate to emergency details or care recipient profile
-                navigation.navigate('EmergencyDetails', {
-                    emergencyId: data.emergency_id || data.care_recipient_id,
-                    careRecipientId: data.care_recipient_id,
+                navigation.navigate('EmergencyScreen', {
+                    emergency_id: data.emergency_id || data.care_recipient_id,
+                    care_recipient_id: data.care_recipient_id,
                     location: data.location
                 });
             }
@@ -162,8 +186,8 @@ function handleNotificationAction(data: any, navigation?: any) {
 
         case 'view_payment':
             if (data.payment_id) {
-                navigation.navigate('PaymentDetails', {
-                    paymentId: data.payment_id
+                navigation.navigate('PaymentScreen', {
+                    bookingId: data.payment_id
                 });
             }
             break;

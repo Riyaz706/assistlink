@@ -5,7 +5,6 @@ import {
     StyleSheet,
     FlatList,
     TouchableOpacity,
-    ActivityIndicator,
     RefreshControl,
     StatusBar
 } from 'react-native';
@@ -13,6 +12,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { api } from './api/client';
+import { LoadingState } from './components/LoadingState';
+import { EmptyState } from './components/EmptyState';
+import BottomNav from './BottomNav';
 
 const StatusBadge = ({ status }: { status: string }) => {
     let color = '#666';
@@ -136,22 +138,27 @@ const BookingsScreen = () => {
         <SafeAreaView style={styles.container} edges={['top']}>
             <StatusBar barStyle="dark-content" />
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginRight: 16 }}>
+                <TouchableOpacity
+                    onPress={() => navigation.goBack()}
+                    style={styles.backButton}
+                    accessibilityLabel="Go back"
+                    accessibilityRole="button"
+                >
                     <Ionicons name="arrow-back" size={24} color="#000" />
                 </TouchableOpacity>
                 <Text style={styles.title}>My Bookings</Text>
                 <TouchableOpacity
                     style={styles.addButton}
                     onPress={() => navigation.navigate('NewRequestScreen')}
+                    accessibilityLabel="Create new booking"
+                    accessibilityRole="button"
                 >
                     <Ionicons name="add" size={24} color="#FFF" />
                 </TouchableOpacity>
             </View>
 
             {loading ? (
-                <View style={styles.center}>
-                    <ActivityIndicator size="large" color="#007AFF" />
-                </View>
+                <LoadingState message="Loading bookings..." />
             ) : (
                 <FlatList
                     data={bookings}
@@ -162,21 +169,22 @@ const BookingsScreen = () => {
                             onPress={() => navigation.navigate('BookingDetailScreen', { bookingId: item.id })}
                         />
                     )}
-                    contentContainerStyle={styles.list}
+                    contentContainerStyle={bookings.length === 0 ? styles.listEmpty : styles.list}
                     refreshControl={
                         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
                     }
                     ListEmptyComponent={
-                        <View style={styles.emptyState}>
-                            <Ionicons name="calendar-outline" size={64} color="#CCC" />
-                            <Text style={styles.emptyText}>No bookings found</Text>
-                            <TouchableOpacity onPress={() => navigation.navigate('NewRequestScreen')}>
-                                <Text style={styles.linkText}>Create a new booking</Text>
-                            </TouchableOpacity>
-                        </View>
+                        <EmptyState
+                            icon="calendar-outline"
+                            title="No bookings yet"
+                            message="Create a request to get matched with a caregiver."
+                            actionLabel="Create a booking"
+                            onAction={() => navigation.navigate('NewRequestScreen')}
+                        />
                     }
                 />
             )}
+            <BottomNav />
         </SafeAreaView>
     );
 };
@@ -201,13 +209,22 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         color: '#000',
     },
+    backButton: {
+        minWidth: 48,
+        minHeight: 48,
+        justifyContent: 'center',
+        marginRight: 16,
+    },
     addButton: {
-        backgroundColor: '#007AFF',
-        width: 36,
-        height: 36,
-        borderRadius: 18,
+        backgroundColor: '#059669',
+        minWidth: 48,
+        minHeight: 48,
+        borderRadius: 24,
         justifyContent: 'center',
         alignItems: 'center',
+    },
+    listEmpty: {
+        flexGrow: 1,
     },
     center: {
         flex: 1,

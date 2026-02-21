@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, status, Depends, Request
+from fastapi import APIRouter, HTTPException, status, Depends, Request, Body
 from fastapi.responses import RedirectResponse, JSONResponse
 from app.schemas import UserCreate, UserResponse, LoginRequest, PasswordChangeRequest
 from app.database import supabase, supabase_admin
@@ -153,7 +153,7 @@ class RefreshTokenRequest(BaseModel):
 
 
 @router.post("/refresh", response_model=dict)
-async def refresh_token(request: RefreshTokenRequest):
+async def refresh_token(body: RefreshTokenRequest = Body(..., embed=False)):
     """
     Refresh access token using refresh token.
     Supports both Supabase session tokens and custom JWT tokens (Google Auth).
@@ -161,7 +161,7 @@ async def refresh_token(request: RefreshTokenRequest):
     try:
         # 1. Try Supabase refresh first (standard login)
         try:
-            response = supabase.auth.refresh_session(request.refresh_token)
+            response = supabase.auth.refresh_session(body.refresh_token)
             if response.session and response.session.access_token:
                 sys.stderr.write(f"[AUTH] Supabase session refreshed successfully\n")
                 sys.stderr.flush()
@@ -181,7 +181,7 @@ async def refresh_token(request: RefreshTokenRequest):
             sys.stderr.write(f"[AUTH] Attempting custom JWT refresh...\n")
             
             # Verify the refresh token
-            payload = jwt.decode(request.refresh_token, settings.SECRET_KEY, algorithms=["HS256"])
+            payload = jwt.decode(body.refresh_token, settings.SECRET_KEY, algorithms=["HS256"])
             
             if payload.get("type") != "refresh":
                 raise AuthenticationError("Invalid token type")

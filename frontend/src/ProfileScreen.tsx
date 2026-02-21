@@ -8,7 +8,9 @@ import {
   ScrollView,
   Switch,
   StatusBar,
-  ActivityIndicator
+  ActivityIndicator,
+  Alert,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -209,7 +211,7 @@ export default function ProfileScreen({ navigation }: any) {
               </View>
             }
             isLast={true}
-            onPress={() => { }}
+            onPress={() => Alert.alert('Language', 'English is the only supported language at this time.')}
           />
         </View>
 
@@ -221,7 +223,7 @@ export default function ProfileScreen({ navigation }: any) {
             iconColor="#be123c"
             label="Help Center"
             rightElement={<MaterialCommunityIcons name="open-in-new" size={20} color={THEME.subText} />}
-            onPress={() => { }}
+            onPress={() => navigation.navigate('HelpSupport')}
           />
           <SettingsItem
             icon="file-document"
@@ -229,7 +231,7 @@ export default function ProfileScreen({ navigation }: any) {
             label="Terms of Service"
             rightElement={<MaterialCommunityIcons name="chevron-right" size={24} color={THEME.subText} />}
             isLast={true}
-            onPress={() => { }}
+            onPress={() => Linking.openURL('https://assistlink.app/terms').catch(() => Alert.alert('Error', 'Could not open Terms of Service.'))}
           />
         </View>
 

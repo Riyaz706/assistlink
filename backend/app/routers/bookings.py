@@ -3,9 +3,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from app.schemas import (
     BookingCreate, BookingUpdate, BookingResponse,
-    VideoCallRequestCreate, VideoCallRequestResponse, VideoCallAcceptRequest,
+    VideoCallRequestCreate, VideoCallRequestResponse, VideoCallFromChatRequest, VideoCallAcceptRequest, VideoCallStatusUpdate,
     ChatSessionResponse, ChatAcceptRequest,
-    BookingStatusUpdate, BookingHistoryResponse, BookingNoteCreate, BookingNoteResponse
+    BookingStatusUpdate, BookingHistoryResponse, BookingNoteCreate, BookingNoteResponse,
+    SlotAvailabilityResponse, SlotBookRequest,
 )
 from app.database import supabase, supabase_admin
 from app.dependencies import get_current_user, verify_care_recipient, verify_caregiver
@@ -63,6 +64,27 @@ async def create_video_call_request(
         except Exception as e:
             # Re-raise as DatabaseError or generic based on type
             raise DatabaseError(f"Error checking caregiver: {str(e)}")
+
+        # Check caregiver is not already booked at this time (same logic as create_booking)
+        st = video_call_data.scheduled_time
+        if st.tzinfo is None:
+            st = st.replace(tzinfo=timezone.utc)
+        duration_sec = video_call_data.duration_seconds or 15
+        call_end = st + timedelta(seconds=duration_sec)
+        day_start = st - timedelta(days=1)
+        day_end = st + timedelta(days=1)
+        existing = supabase_admin.table("bookings").select("scheduled_date, duration_hours").eq("caregiver_id", str(video_call_data.caregiver_id)).in_("status", ["accepted", "confirmed", "in_progress"]).gte("scheduled_date", day_start.isoformat()).lte("scheduled_date", day_end.isoformat()).execute()
+        for b in (existing.data or []):
+            b_start_str = (b.get("scheduled_date") or "").replace("Z", "+00:00")
+            if not b_start_str:
+                continue
+            b_start = datetime.fromisoformat(b_start_str)
+            if b_start.tzinfo is None:
+                b_start = b_start.replace(tzinfo=timezone.utc)
+            b_dur = float(b.get("duration_hours") or 0)
+            b_end = b_start + timedelta(hours=b_dur)
+            if st < b_end and call_end > b_start:
+                raise ConflictError("Caregiver is already booked for this time slot.")
         
         # Create video call request
         scheduled_time_iso = video_call_data.scheduled_time.isoformat()
@@ -170,6 +192,59 @@ async def create_video_call_request(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error creating video call request: {error_msg}"
         )
+
+
+@router.post("/video-call/from-chat", response_model=VideoCallRequestResponse, status_code=status.HTTP_201_CREATED)
+async def create_video_call_from_chat(
+    body: VideoCallFromChatRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Start an instant video call from an existing chat session.
+    Either care recipient or caregiver can start the call; both are auto-accepted so they can join immediately.
+    """
+    try:
+        user_id = str(current_user.get("id", ""))
+        if not user_id:
+            raise AuthenticationError("User ID not found")
+        chat_session_id = str(body.chat_session_id)
+        session_res = supabase_admin.table("chat_sessions").select("id, care_recipient_id, caregiver_id").eq("id", chat_session_id).eq("is_enabled", True).execute()
+        if not session_res.data:
+            raise NotFoundError("Chat session not found or disabled", details={"chat_session_id": chat_session_id})
+        session = session_res.data[0]
+        care_recipient_id = str(session["care_recipient_id"])
+        caregiver_id = str(session["caregiver_id"])
+        if user_id not in (care_recipient_id, caregiver_id):
+            raise AuthorizationError("You are not a participant in this chat")
+        # Reuse an existing accepted call from this chat (same pair) in the last 15 minutes so both parties get the same callId
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=15)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        existing = supabase_admin.table("video_call_requests").select("*").eq("care_recipient_id", care_recipient_id).eq("caregiver_id", caregiver_id).eq("status", "accepted").gte("created_at", cutoff).order("created_at", desc=True).limit(1).execute()
+        if existing.data:
+            return existing.data[0]
+        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        video_call_dict = {
+            "care_recipient_id": care_recipient_id,
+            "caregiver_id": caregiver_id,
+            "scheduled_time": now_iso,
+            "duration_seconds": 900,
+            "status": "accepted",
+            "care_recipient_accepted": True,
+            "caregiver_accepted": True,
+            "video_call_url": generate_video_call_url(),
+        }
+        response = supabase_admin.table("video_call_requests").insert(video_call_dict).execute()
+        if not response.data:
+            raise DatabaseError("Failed to create video call from chat")
+        video_call = response.data[0]
+        return video_call
+    except HTTPException:
+        raise
+    except AppError:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise DatabaseError(f"Error creating video call from chat: {str(e)}")
 
 
 @router.get("/video-call/{video_call_id}", response_model=VideoCallRequestResponse)
@@ -623,6 +698,182 @@ async def join_video_call(
         )
 
 
+@router.get("/video-call/{video_call_id}/status")
+async def get_video_call_status(
+    video_call_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get the current status of a video call request.
+    Used by the frontend to poll for status changes (e.g., pending → accepted → declined).
+    """
+    try:
+        response = supabase_admin.table("video_call_requests").select(
+            "id, status, care_recipient_accepted, caregiver_accepted, scheduled_time, video_call_url"
+        ).eq("id", video_call_id).execute()
+
+        if not response.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Video call request not found"
+            )
+
+        video_call = response.data[0]
+
+        # Access guard: only participants can poll this
+        if str(current_user.get("id", "")) not in [
+            str(video_call.get("care_recipient_id", "")),
+            str(video_call.get("caregiver_id", ""))
+        ]:
+            # Re-fetch with all fields to do the access check
+            full = supabase_admin.table("video_call_requests").select("care_recipient_id, caregiver_id").eq("id", video_call_id).execute()
+            if full.data:
+                row = full.data[0]
+                uid = str(current_user.get("id", ""))
+                if uid not in [str(row.get("care_recipient_id", "")), str(row.get("caregiver_id", ""))]:
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+        return {
+            "id": video_call.get("id"),
+            "status": video_call.get("status", "pending"),
+            "care_recipient_accepted": video_call.get("care_recipient_accepted", False),
+            "caregiver_accepted": video_call.get("caregiver_accepted", False),
+            "scheduled_time": video_call.get("scheduled_time"),
+            "video_call_url": video_call.get("video_call_url"),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] Error in get_video_call_status: {e}", flush=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.patch("/video-call/{video_call_id}/status", response_model=VideoCallRequestResponse)
+async def update_video_call_status(
+    video_call_id: str,
+    status_update: VideoCallStatusUpdate,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Update the status of a video call request (e.g., in_progress, completed).
+    """
+    try:
+        # Get current video call
+        response = supabase_admin.table("video_call_requests").select("*").eq("id", video_call_id).execute()
+        
+        if not response.data:
+            raise NotFoundError("Video call request not found")
+        
+        video_call = response.data[0]
+        
+        # Access guard
+        uid = str(current_user.get("id", ""))
+        if uid not in [str(video_call.get("care_recipient_id", "")), str(video_call.get("caregiver_id", ""))]:
+             raise AuthorizationError("Access denied")
+             
+        new_status = status_update.status
+        
+        update_data = {"status": new_status}
+        if new_status == "completed":
+            update_data["completed_at"] = datetime.now(timezone.utc).isoformat()
+            
+        print(f"[INFO] Updating video call {video_call_id} to {new_status}", flush=True)
+        
+        update_res = supabase_admin.table("video_call_requests").update(update_data).eq("id", video_call_id).execute()
+        
+        if not update_res.data:
+             raise DatabaseError("Failed to update status")
+             
+        updated_call = update_res.data[0]
+        
+        # Send notification
+        try:
+            other_party_id = str(video_call.get("caregiver_id")) if uid == str(video_call.get("care_recipient_id")) else str(video_call.get("care_recipient_id"))
+            
+            await notify_video_call_status_change(
+                user_id=other_party_id,
+                other_party_name=current_user.get("full_name", "User"),
+                video_call_id=video_call_id,
+                status=new_status
+            )
+        except Exception as e:
+             print(f"[WARN] Failed to send status notification: {e}", flush=True)
+             
+        return updated_call
+
+    except AppError:
+        raise
+    except Exception as e:
+         print(f"[ERROR] Error in update_video_call_status: {e}", flush=True)
+         raise DatabaseError(f"Failed to update video call status: {str(e)}")
+
+
+@router.post("/video-call/{id}/complete")
+async def complete_video_call(
+    id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Mark video call (and linked booking) as completed.
+    Accepts either video_call_id or booking_id (frontend may pass bookingId).
+    """
+    try:
+        uid = str(current_user.get("id", ""))
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        # 1) Try as video_call_request id
+        vc_res = supabase_admin.table("video_call_requests").select("*").eq("id", id).execute()
+        if vc_res.data and len(vc_res.data) > 0:
+            vc = vc_res.data[0]
+            if uid not in [str(vc.get("care_recipient_id", "")), str(vc.get("caregiver_id", ""))]:
+                raise AuthorizationError("Access denied")
+            supabase_admin.table("video_call_requests").update({
+                "status": "completed",
+                "completed_at": now_iso,
+                "updated_at": now_iso,
+            }).eq("id", id).execute()
+            # Update linked booking if any
+            bk_res = supabase_admin.table("bookings").select("id").eq("video_call_request_id", id).limit(1).execute()
+            if bk_res.data and len(bk_res.data) > 0:
+                supabase_admin.table("bookings").update({
+                    "status": "completed",
+                    "completed_at": now_iso,
+                    "updated_at": now_iso,
+                }).eq("id", bk_res.data[0]["id"]).execute()
+            return {"status": "completed", "video_call_id": id}
+
+        # 2) Try as booking id
+        bk_res = supabase_admin.table("bookings").select("id, video_call_request_id, care_recipient_id, caregiver_id").eq("id", id).execute()
+        if bk_res.data and len(bk_res.data) > 0:
+            bk = bk_res.data[0]
+            if uid not in [str(bk.get("care_recipient_id", "")), str(bk.get("caregiver_id", ""))]:
+                raise AuthorizationError("Access denied")
+            supabase_admin.table("bookings").update({
+                "status": "completed",
+                "completed_at": now_iso,
+                "updated_at": now_iso,
+            }).eq("id", id).execute()
+            vc_id = bk.get("video_call_request_id")
+            if vc_id:
+                supabase_admin.table("video_call_requests").update({
+                    "status": "completed",
+                    "completed_at": now_iso,
+                    "updated_at": now_iso,
+                }).eq("id", vc_id).execute()
+            return {"status": "completed", "booking_id": id}
+
+        raise NotFoundError("Video call or booking not found", details={"id": id})
+    except (AppError, HTTPException):
+        raise
+    except Exception as e:
+        print(f"[ERROR] complete_video_call: {e}", flush=True)
+        raise DatabaseError(f"Failed to complete video call: {str(e)}")
+
+
 @router.post("/chat/{chat_session_id}/enable")
 async def enable_chat_session(
     chat_session_id: str,
@@ -743,6 +994,7 @@ VALID_TRANSITIONS = {
     ("requested", "care_recipient"): {"cancelled"},
     ("accepted", "care_recipient"): {"cancelled"},
     ("confirmed", "care_recipient"): {"cancelled"},
+    ("in_progress", "care_recipient"): {"completed", "cancelled"},
     
     # Caregiver Transitions
     ("requested", "caregiver"): {"accepted", "cancelled"}, # cancelled = rejected
@@ -796,6 +1048,186 @@ async def _log_booking_history(booking_id: str, old_status: str | None, new_stat
         print(f"[WARN] Failed to log booking history: {e}", flush=True)
 
 
+def _slot_overlap(req_start: datetime, req_end: datetime, b_start: datetime, b_end: datetime) -> bool:
+    """Overlap: (startA < endB) AND (endA > startB). All times must be timezone-aware (UTC)."""
+    return req_start < b_end and req_end > b_start
+
+
+@router.get("/slot-availability", response_model=SlotAvailabilityResponse)
+async def check_slot_availability(
+    caregiver_id: str,
+    start_time: str,
+    end_time: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Check if a slot is available for a caregiver.
+    Considers only bookings with status: requested, accepted, confirmed, in_progress.
+    Overlap rule: (startA < endB) AND (endA > startB).
+    """
+    try:
+        req_start = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+        req_end = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        raise ValidationError("Invalid start_time or end_time; use ISO 8601 format (UTC).")
+    if req_start.tzinfo is None:
+        req_start = req_start.replace(tzinfo=timezone.utc)
+    if req_end.tzinfo is None:
+        req_end = req_end.replace(tzinfo=timezone.utc)
+    if req_start >= req_end:
+        raise ValidationError("start_time must be before end_time.")
+
+    try:
+        rpc = supabase_admin.rpc(
+            "check_slot_available",
+            {
+                "p_caregiver_id": caregiver_id,
+                "p_start_time": req_start.isoformat(),
+                "p_end_time": req_end.isoformat(),
+                "p_exclude_booking_id": None,
+            },
+        ).execute()
+        # RPC returns single value; Supabase may wrap in list
+        available = rpc.data if isinstance(rpc.data, bool) else (rpc.data[0] if rpc.data else False)
+    except Exception as e:
+        err_str = str(e).lower()
+        if "function" in err_str and "does not exist" in err_str:
+            # Fallback: compute in app when RPC not yet deployed
+            day_start = req_start - timedelta(days=1)
+            day_end = req_end + timedelta(days=1)
+            existing = supabase_admin.table("bookings").select("scheduled_date, duration_hours").eq(
+                "caregiver_id", caregiver_id
+            ).in_("status", ["requested", "accepted", "confirmed", "in_progress"]).gte(
+                "scheduled_date", day_start.isoformat()
+            ).lte("scheduled_date", day_end.isoformat()).execute()
+            available = True
+            for b in (existing.data or []):
+                b_start_str = (b.get("scheduled_date") or "").replace("Z", "+00:00")
+                if not b_start_str:
+                    continue
+                b_start = datetime.fromisoformat(b_start_str)
+                if b_start.tzinfo is None:
+                    b_start = b_start.replace(tzinfo=timezone.utc)
+                b_end = b_start + timedelta(hours=float(b.get("duration_hours") or 0))
+                if _slot_overlap(req_start, req_end, b_start, b_end):
+                    available = False
+                    break
+        else:
+            raise DatabaseError(f"Failed to check slot availability: {str(e)}")
+
+    return SlotAvailabilityResponse(
+        available=available,
+        caregiver_id=uuid.UUID(caregiver_id),
+        start_time=req_start,
+        end_time=req_end,
+    )
+
+
+def _call_book_slot_atomic(
+    care_recipient_id: str,
+    caregiver_id: str,
+    service_type: str,
+    scheduled_date: datetime,
+    duration_hours: float,
+    location: Optional[dict] = None,
+    specific_needs: Optional[str] = None,
+    is_emergency: bool = False,
+    video_call_request_id: Optional[str] = None,
+    chat_session_id: Optional[str] = None,
+) -> dict:
+    """
+    Call PostgreSQL RPC book_slot_atomic. Single transaction: lock, re-check overlap, insert.
+    Raises ConflictError if slot already booked, ValidationError if invalid time or past.
+    """
+    if scheduled_date.tzinfo is None:
+        scheduled_date = scheduled_date.replace(tzinfo=timezone.utc)
+    # Reject past and zero-duration (backend authority; RPC also enforces)
+    now_utc = datetime.now(timezone.utc)
+    end_time = scheduled_date + timedelta(hours=duration_hours)
+    if end_time <= now_utc:
+        raise ValidationError("You cannot book a slot in the past. Please choose a future time.")
+    if duration_hours <= 0 or duration_hours > 24:
+        raise ValidationError("Duration must be between 0.5 and 24 hours.")
+    payload = {
+        "p_care_recipient_id": care_recipient_id,
+        "p_caregiver_id": caregiver_id,
+        "p_service_type": service_type,
+        "p_scheduled_date": scheduled_date.isoformat(),
+        "p_duration_hours": float(duration_hours),
+        "p_location": location,
+        "p_specific_needs": specific_needs,
+        "p_is_emergency": is_emergency,
+        "p_video_call_request_id": video_call_request_id,
+        "p_chat_session_id": chat_session_id,
+    }
+    try:
+        rpc = supabase_admin.rpc("book_slot_atomic", payload).execute()
+    except Exception as e:
+        err_str = str(e).lower()
+        if "slot_already_booked" in err_str or "23p01" in err_str:
+            raise ConflictError("This time slot was just booked by someone else. Please choose another time or caregiver.")
+        if "slot_in_past" in err_str:
+            raise ValidationError("You cannot book a slot in the past. Please choose a future time.")
+        if "slot_invalid_time" in err_str or "22p02" in err_str:
+            raise ValidationError("Invalid time range. Please use a valid start time and duration (0.5–24 hours).")
+        raise DatabaseError(f"Booking failed: {str(e)}")
+    # RPC returns JSONB single object; Supabase may return as list of one element
+    data = rpc.data
+    if isinstance(data, list):
+        data = data[0] if data else None
+    if not data:
+        raise DatabaseError("Booking failed: no data returned.")
+    return data
+
+
+@router.post("/slot", response_model=BookingResponse, status_code=status.HTTP_201_CREATED)
+async def create_slot_booking(
+    body: SlotBookRequest,
+    current_user: dict = Depends(verify_care_recipient),
+):
+    """
+    Production-ready atomic slot booking.
+    Prevents double booking and race conditions. Two users booking the same slot → only one succeeds.
+    Use is_emergency=true to allow booking even when caregiver appears busy (override).
+    """
+    user_id = str(current_user.get("id"))
+    if not user_id:
+        raise AuthenticationError("User ID not found")
+
+    caregiver_id = str(body.caregiver_id)
+    cg_check = supabase_admin.table("users").select("id, is_active").eq("id", caregiver_id).eq("role", "caregiver").execute()
+    if not cg_check.data or not cg_check.data[0].get("is_active", True):
+        raise ValidationError("Caregiver is not available or inactive.")
+
+    video_call_id = str(body.video_call_request_id) if body.video_call_request_id else None
+    chat_id = str(body.chat_session_id) if body.chat_session_id else None
+
+    booking = _call_book_slot_atomic(
+        care_recipient_id=user_id,
+        caregiver_id=caregiver_id,
+        service_type=body.service_type,
+        scheduled_date=body.scheduled_date,
+        duration_hours=body.duration_hours,
+        location=body.location,
+        specific_needs=body.specific_needs,
+        is_emergency=body.is_emergency,
+        video_call_request_id=video_call_id,
+        chat_session_id=chat_id,
+    )
+
+    booking_id = booking.get("id")
+    if booking_id:
+        await _log_booking_history(booking_id, None, "requested", user_id, "Slot booking (atomic)")
+        try:
+            care_recipient_response = supabase_admin.table("users").select("full_name").eq("id", user_id).execute()
+            care_recipient_name = (care_recipient_response.data[0].get("full_name", "A care recipient") if care_recipient_response.data else "A care recipient")
+            await notify_booking_created(caregiver_id=caregiver_id, care_recipient_name=care_recipient_name, booking_id=booking_id)
+        except Exception as e:
+            print(f"[WARN] Failed to send notification: {e}", flush=True)
+
+    return booking
+
+
 @router.post("", response_model=BookingResponse, status_code=status.HTTP_201_CREATED)
 async def create_booking(
     booking_data: BookingCreate,
@@ -803,118 +1235,197 @@ async def create_booking(
 ):
     """
     Create a booking.
-    - Validates caregiver availability.
-    - Prevents double booking.
-    - Supports initial status 'draft' or 'requested'.
+    When caregiver_id is set and status is 'requested', uses atomic slot booking (no race conditions).
+    Otherwise supports 'draft' or legacy flow.
     """
     print(f"[INFO] Creating booking for user {current_user.get('id')}", flush=True)
     try:
-        user_id = current_user.get("id")
-        booking_dict = booking_data.model_dump(exclude_unset=True)
-        
-        # 1. Format Data
-        if "scheduled_date" in booking_dict and isinstance(booking_dict["scheduled_date"], datetime):
-            booking_dict["scheduled_date"] = booking_dict["scheduled_date"].isoformat()
-        
-        # Ensure UUIDs are strings
         from uuid import UUID
-        for key, value in booking_dict.items():
-            if isinstance(value, UUID):
-                booking_dict[key] = str(value)
-        
-        booking_dict["care_recipient_id"] = str(user_id)
-        
-        # Default status for creation is 'requested' unless specified as 'draft'
+        user_id = str(current_user.get("id"))
+        booking_dict = booking_data.model_dump(exclude_unset=True)
         initial_status = booking_dict.get("status", "requested")
         if initial_status not in ["draft", "requested"]:
             initial_status = "requested"
-        booking_dict["status"] = initial_status
-
         caregiver_id = booking_dict.get("caregiver_id")
 
-        # 2. Availability & Double Booking Check (Only if not draft)
+        # Atomic path: requested + caregiver_id → use RPC (production-safe)
         if initial_status == "requested" and caregiver_id:
-            # Check if caregiver exists and is active
-            cg_check = supabase.table("users").select("id, is_active").eq("id", caregiver_id).eq("role", "caregiver").execute()
-            if not cg_check.data or not cg_check.data[0]["is_active"]:
-                 raise ValidationError("Caregiver is not available or inactive.")
-
-            # Check for overlapping bookings for this caregiver
-            # Fetch bookings for this caregiver on the same day (+/- 24 hrs)
+            caregiver_id_str = str(caregiver_id)
+            cg_check = supabase.table("users").select("id, is_active").eq("id", caregiver_id_str).eq("role", "caregiver").execute()
+            if not cg_check.data or not cg_check.data[0].get("is_active", True):
+                raise ValidationError("Caregiver is not available or inactive.")
             scheduled_time = booking_data.scheduled_date
-            duration_hours = booking_data.duration_hours
-            
+            duration_hours = float(booking_data.duration_hours or 0)
+            video_call_id = None
+            chat_id = None
+            try:
+                video_call_check = supabase.table("video_call_requests").select("*").eq("care_recipient_id", user_id).eq("caregiver_id", caregiver_id_str).eq("status", "accepted").order("created_at", desc=True).limit(1).execute()
+                if video_call_check.data:
+                    video_call_id = video_call_check.data[0]["id"]
+                chat_check = supabase.table("chat_sessions").select("*").eq("care_recipient_id", user_id).eq("caregiver_id", caregiver_id_str).eq("is_enabled", True).limit(1).execute()
+                if chat_check.data:
+                    chat_id = chat_check.data[0]["id"]
+            except Exception as e:
+                print(f"[WARN] Error validation video/chat linkage: {e}")
+
+            booking = _call_book_slot_atomic(
+                care_recipient_id=user_id,
+                caregiver_id=caregiver_id_str,
+                service_type=booking_data.service_type,
+                scheduled_date=scheduled_time,
+                duration_hours=duration_hours,
+                location=booking_dict.get("location"),
+                specific_needs=booking_dict.get("specific_needs"),
+                is_emergency=(booking_dict.get("urgency_level") == "emergency"),
+                video_call_request_id=video_call_id,
+                chat_session_id=chat_id,
+            )
+            booking_id = booking.get("id")
+            await _log_booking_history(booking_id, None, initial_status, user_id, "Initial booking creation (atomic)")
+            if caregiver_id_str:
+                try:
+                    care_recipient_response = supabase_admin.table("users").select("full_name").eq("id", user_id).execute()
+                    care_recipient_name = (care_recipient_response.data[0].get("full_name", "A care recipient") if care_recipient_response.data else "A care recipient")
+                    await notify_booking_created(caregiver_id=caregiver_id_str, care_recipient_name=care_recipient_name, booking_id=booking_id)
+                except Exception as e:
+                    print(f"[WARN] Failed to send notification: {e}", flush=True)
+            return booking
+
+        # Non-atomic path: draft or no caregiver
+        for key, value in booking_dict.items():
+            if isinstance(value, UUID):
+                booking_dict[key] = str(value)
+        if "scheduled_date" in booking_dict and isinstance(booking_dict["scheduled_date"], datetime):
+            booking_dict["scheduled_date"] = booking_dict["scheduled_date"].isoformat()
+        booking_dict["care_recipient_id"] = user_id
+        booking_dict["status"] = initial_status
+
+        if initial_status == "requested" and caregiver_id:
+            cg_check = supabase.table("users").select("id, is_active").eq("id", str(caregiver_id)).eq("role", "caregiver").execute()
+            if not cg_check.data or not cg_check.data[0]["is_active"]:
+                raise ValidationError("Caregiver is not available or inactive.")
+            scheduled_time = booking_data.scheduled_date
+            if scheduled_time.tzinfo is None:
+                scheduled_time = scheduled_time.replace(tzinfo=timezone.utc)
+            duration_hours = float(booking_data.duration_hours or 0)
             day_start = scheduled_time - timedelta(days=1)
             day_end = scheduled_time + timedelta(days=1)
-            
-            existing_bookings = supabase_admin.table("bookings").select("scheduled_date, duration_hours").eq("caregiver_id", caregiver_id).in_("status", ["accepted", "confirmed", "in_progress"]).gte("scheduled_date", day_start.isoformat()).lte("scheduled_date", day_end.isoformat()).execute()
-            
+            existing_bookings = supabase_admin.table("bookings").select("scheduled_date, duration_hours").eq("caregiver_id", str(caregiver_id)).in_("status", ["accepted", "confirmed", "in_progress"]).gte("scheduled_date", day_start.isoformat()).lte("scheduled_date", day_end.isoformat()).execute()
             req_start = scheduled_time
             req_end = req_start + timedelta(hours=duration_hours)
-            
-            for b in existing_bookings.data:
-                # Naive datetime handling - assuming UTC or matching naive
-                b_start_str = b["scheduled_date"].replace('Z', '+00:00')
+            for b in (existing_bookings.data or []):
+                b_start_str = (b.get("scheduled_date") or "").replace("Z", "+00:00")
+                if not b_start_str:
+                    continue
                 b_start = datetime.fromisoformat(b_start_str)
-                b_end = b_start + timedelta(hours=b["duration_hours"])
-                
-                # Check overlap
+                if b_start.tzinfo is None:
+                    b_start = b_start.replace(tzinfo=timezone.utc)
+                b_duration = float(b.get("duration_hours") or 0)
+                b_end = b_start + timedelta(hours=b_duration)
                 if req_start < b_end and req_end > b_start:
-                    raise ConflictError("Caregiver is already booked for this time slot.")
+                    raise ConflictError("Caregiver is already booked for this time slot. Please choose another time or caregiver.")
 
-        # 3. Link Video Call / Chat if applicable
         if caregiver_id:
             try:
-                # Check accepted video call
-                video_call_check = supabase.table("video_call_requests").select("*").eq("care_recipient_id", user_id).eq("caregiver_id", caregiver_id).eq("status", "accepted").order("created_at", desc=True).limit(1).execute()
+                video_call_check = supabase.table("video_call_requests").select("*").eq("care_recipient_id", user_id).eq("caregiver_id", str(caregiver_id)).eq("status", "accepted").order("created_at", desc=True).limit(1).execute()
                 if video_call_check.data:
                     booking_dict["video_call_request_id"] = video_call_check.data[0]["id"]
-                
-                # Check enabled chat session
-                chat_check = supabase.table("chat_sessions").select("*").eq("care_recipient_id", user_id).eq("caregiver_id", caregiver_id).eq("is_enabled", True).limit(1).execute()
+                chat_check = supabase.table("chat_sessions").select("*").eq("care_recipient_id", user_id).eq("caregiver_id", str(caregiver_id)).eq("is_enabled", True).limit(1).execute()
                 if chat_check.data:
                     booking_dict["chat_session_id"] = chat_check.data[0]["id"]
             except Exception as e:
                 print(f"[WARN] Error validation video/chat linkage: {e}")
 
-        # 4. Insert Booking
         print(f"[INFO] Inserting booking: {booking_dict}", flush=True)
         response = supabase.table("bookings").insert(booking_dict).execute()
-        
         if not response.data:
             raise DatabaseError("Failed to create booking")
-        
         booking = response.data[0]
         booking_id = booking["id"]
-
-        # 5. Log History
-        await _log_booking_history(booking_id, None, initial_status, str(user_id), "Initial booking creation")
-
-        # 6. Post-Creation Actions (Notifications, Availability)
+        await _log_booking_history(booking_id, None, initial_status, user_id, "Initial booking creation")
         if initial_status == "requested" and caregiver_id:
-             # Notify Caregiver
             try:
                 care_recipient_response = supabase_admin.table("users").select("full_name").eq("id", user_id).execute()
                 care_recipient_name = care_recipient_response.data[0].get("full_name", "A care recipient") if care_recipient_response.data else "A care recipient"
-                
-                await notify_booking_created(
-                    caregiver_id=caregiver_id,
-                    care_recipient_name=care_recipient_name,
-                    booking_id=booking_id
-                )
+                await notify_booking_created(caregiver_id=str(caregiver_id), care_recipient_name=care_recipient_name, booking_id=booking_id)
             except Exception as e:
-                 print(f"[WARN] Failed to send notification: {e}", flush=True)
-                 import traceback
-                 traceback.print_exc()
-
+                print(f"[WARN] Failed to send notification: {e}", flush=True)
         return booking
 
     except HTTPException:
         raise
+    except AppError:
+        raise
     except Exception as e:
+        err_str = str(e).lower()
+        if "23p01" in err_str or "prevent_caregiver_double_booking" in err_str or "exclusion constraint" in err_str or "slot_already_booked" in err_str:
+            raise ConflictError("Caregiver is already booked for this time slot. Please choose another time or caregiver.")
         import traceback
         traceback.print_exc()
         raise DatabaseError(f"Error creating booking: {str(e)}")
+
+
+@router.post("/{booking_id}/complete", response_model=BookingResponse)
+async def complete_booking(
+    booking_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Mark a booking as completed (and linked video call if any).
+    Used by frontend as POST /api/bookings/{booking_id}/complete.
+    Enforces valid transition (e.g. in_progress -> completed for caregiver).
+    """
+    import sys
+    sys.stderr.write(f"[BOOKINGS] complete_booking called: booking_id={booking_id}\n")
+    sys.stderr.flush()
+    try:
+        user_id = str(current_user.get("id", ""))
+        user_role = current_user.get("role")
+        if user_role == "authenticated":
+            user_data = supabase_admin.table("users").select("role").eq("id", user_id).execute()
+            if user_data.data:
+                user_role = user_data.data[0].get("role", "care_recipient")
+
+        res = supabase_admin.table("bookings").select("*").eq("id", booking_id).execute()
+        if not res.data:
+            raise NotFoundError("Booking not found")
+        booking = res.data[0]
+
+        if str(booking["caregiver_id"]) != user_id and str(booking["care_recipient_id"]) != user_id:
+            raise AuthorizationError("Access denied")
+
+        current_status = booking["status"]
+        if current_status == "completed":
+            return booking
+
+        validate_booking_transition(current_status, "completed", user_role or "care_recipient")
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        update_data = {
+            "status": "completed",
+            "completed_at": now_iso,
+            "updated_at": now_iso,
+        }
+        supabase_admin.table("bookings").update(update_data).eq("id", booking_id).execute()
+
+        vc_id = booking.get("video_call_request_id")
+        if vc_id:
+            supabase_admin.table("video_call_requests").update({
+                "status": "completed",
+                "completed_at": now_iso,
+                "updated_at": now_iso,
+            }).eq("id", vc_id).execute()
+
+        await _log_booking_history(booking_id, current_status, "completed", user_id, "Marked complete")
+
+        updated = supabase_admin.table("bookings").select("*").eq("id", booking_id).execute()
+        if updated.data:
+            return updated.data[0]
+        return {**booking, **update_data}
+    except (HTTPException, AppError):
+        raise
+    except Exception as e:
+        raise DatabaseError(f"Error completing booking: {str(e)}")
 
 
 @router.post("/{booking_id}/respond", response_model=BookingResponse)
@@ -931,23 +1442,27 @@ async def respond_to_booking(
         user_id = current_user.get("id")
         user_role = "caregiver" # Explicitly define role for this endpoint
         
-        res = supabase.table("bookings").select("*").eq("id", booking_id).execute()
+        res = supabase_admin.table("bookings").select("*").eq("id", booking_id).execute()
         if not res.data:
             raise NotFoundError("Booking not found")
         booking = res.data[0]
         
-        if booking["caregiver_id"] != user_id:
+        if str(booking["caregiver_id"]) != str(user_id):
             raise AuthorizationError("You are not assigned to this booking")
             
         current_status = booking["status"]
         new_status = response_data.status
-        
+
         # Map rejected to cancelled for consistency
         if new_status == "rejected":
-             new_status = "cancelled" 
-             
+            new_status = "cancelled"
+
         if new_status not in ["accepted", "cancelled"]:
-             raise ValidationError("Response status must be 'accepted' or 'cancelled'")
+            raise ValidationError("Response status must be 'accepted' or 'cancelled'")
+
+        # Idempotent: already in the requested state — return current booking
+        if current_status == new_status:
+            return booking
 
         # Validate Transition
         validate_booking_transition(current_status, new_status, user_role)
@@ -986,6 +1501,8 @@ async def respond_to_booking(
 
     except HTTPException:
         raise
+    except AppError:
+        raise
     except Exception as e:
         raise DatabaseError(f"Error responding to booking: {str(e)}")
 
@@ -1010,12 +1527,12 @@ async def update_booking_status(
             if user_data.data:
                 user_role = user_data.data[0]["role"]
         
-        res = supabase.table("bookings").select("*").eq("id", booking_id).execute()
+        res = supabase_admin.table("bookings").select("*").eq("id", booking_id).execute()
         if not res.data:
             raise NotFoundError("Booking not found")
         booking = res.data[0]
         
-        if booking["caregiver_id"] != user_id and booking["care_recipient_id"] != user_id:
+        if str(booking["caregiver_id"]) != str(user_id) and str(booking["care_recipient_id"]) != str(user_id):
              raise AuthorizationError("Access denied")
              
         current_status = booking["status"]
@@ -1076,14 +1593,14 @@ async def get_booking_history(
 ):
     """Get history of status changes"""
     try:
-        booking = supabase.table("bookings").select("caregiver_id, care_recipient_id").eq("id", booking_id).execute()
+        booking = supabase_admin.table("bookings").select("caregiver_id, care_recipient_id").eq("id", booking_id).execute()
         if not booking.data:
              raise NotFoundError("Booking not found")
         b = booking.data[0]
-        if b["caregiver_id"] != current_user["id"] and b["care_recipient_id"] != current_user["id"]:
+        if str(b["caregiver_id"]) != str(current_user["id"]) and str(b["care_recipient_id"]) != str(current_user["id"]):
              raise AuthorizationError("Access denied")
              
-        res = supabase.table("booking_history").select("*").eq("booking_id", booking_id).order("created_at", desc=False).execute()
+        res = supabase_admin.table("booking_history").select("*").eq("booking_id", booking_id).order("created_at", desc=False).execute()
         return res.data
     except Exception as e:
         raise DatabaseError(str(e))
@@ -1097,11 +1614,11 @@ async def add_booking_note(
 ):
     """Add a note to the booking"""
     try:
-        booking = supabase.table("bookings").select("caregiver_id, care_recipient_id").eq("id", booking_id).execute()
+        booking = supabase_admin.table("bookings").select("caregiver_id, care_recipient_id").eq("id", booking_id).execute()
         if not booking.data:
              raise NotFoundError("Booking not found")
         b = booking.data[0]
-        if b["caregiver_id"] != current_user["id"] and b["care_recipient_id"] != current_user["id"]:
+        if str(b["caregiver_id"]) != str(current_user["id"]) and str(b["care_recipient_id"]) != str(current_user["id"]):
              raise AuthorizationError("Access denied")
              
         data = {
@@ -1110,7 +1627,7 @@ async def add_booking_note(
              "note": note.note,
              "is_private": note.is_private
         }
-        res = supabase.table("booking_notes").insert(data).execute()
+        res = supabase_admin.table("booking_notes").insert(data).execute()
         return res.data[0]
     except Exception as e:
         raise DatabaseError(str(e))
@@ -1135,7 +1652,7 @@ async def get_booking_details(
         # Supabase syntax for joins in python client:
         # .select("*, care_recipient:users!care_recipient_id(*), caregiver:users!caregiver_id(*)")
         
-        query = supabase.table("bookings").select(
+        query = supabase_admin.table("bookings").select(
             "*, care_recipient:users!care_recipient_id(*), caregiver:users!caregiver_id(*)"
         ).eq("id", str(booking_id))
         

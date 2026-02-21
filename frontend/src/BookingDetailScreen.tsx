@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { api } from './api/client';
 import { useAuth } from './context/AuthContext';
+import BottomNav from './BottomNav';
 
 const StatusTimeline = ({ history }: { history: any[] }) => {
     if (!history || history.length === 0) return null;
@@ -60,7 +61,7 @@ const BookingDetailScreen = () => {
     const fetchDetails = async (showLoading = true) => {
         try {
             if (showLoading) setLoading(true);
-            const bookingPromise = api.request(`/api/bookings/${bookingId}`);
+            const bookingPromise = api.getBooking(bookingId);
             const historyPromise = api.getBookingHistory(bookingId);
             const reviewPromise = api.getBookingReview(bookingId);
 
@@ -112,14 +113,22 @@ const BookingDetailScreen = () => {
             if (newStatus === 'accepted' || newStatus === 'rejected') {
                 await api.respondToBooking(bookingId, newStatus as any, reason);
             } else if (newStatus === 'cancelled') {
-                await api.cancelBooking(bookingId);
+                await api.cancelBooking(bookingId, reason);
             } else {
                 await api.updateBookingStatus(bookingId, newStatus, reason);
             }
             Alert.alert("Success", `Booking ${newStatus}`);
             fetchDetails();
         } catch (error: any) {
-            Alert.alert("Error", error.message || "Failed to update status");
+            if (error?.statusCode === 409) {
+                Alert.alert(
+                    "Cannot Update",
+                    "This booking has already been completed or cancelled.",
+                    [{ text: "OK", onPress: () => fetchDetails() }]
+                );
+            } else {
+                Alert.alert("Error", error?.message || "Failed to update status");
+            }
         } finally {
             setActionLoading(false);
         }
@@ -390,6 +399,49 @@ const BookingDetailScreen = () => {
                     </View>
                 </View>
             </Modal>
+
+            {/* Add Note Modal */}
+            <Modal
+                transparent={true}
+                visible={noteModalVisible}
+                onRequestClose={() => setNoteModalVisible(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        <Text style={styles.modalTitle}>Add Note</Text>
+                        <TextInput
+                            style={styles.noteInput}
+                            multiline
+                            placeholder="Enter your note here..."
+                            value={noteText}
+                            onChangeText={setNoteText}
+                        />
+                        <View style={styles.modalButtons}>
+                            <TouchableOpacity
+                                style={styles.modalButtonCancel}
+                                onPress={() => { setNoteModalVisible(false); setNoteText(''); }}
+                            >
+                                <Text style={styles.modalButtonTextCancel}>Cancel</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.modalButtonConfirm}
+                                onPress={() => {
+                                    if (!noteText.trim()) {
+                                        Alert.alert('Note is empty', 'Please type something before saving.');
+                                        return;
+                                    }
+                                    setNoteModalVisible(false);
+                                    setNoteText('');
+                                    Alert.alert('Note Saved', 'Your note has been recorded.');
+                                }}
+                            >
+                                <Text style={styles.modalButtonTextConfirm}>Save</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+            <BottomNav />
         </SafeAreaView>
     );
 };
@@ -442,6 +494,7 @@ const styles = StyleSheet.create({
     },
     scrollContent: {
         padding: 16,
+        paddingBottom: 100,
     },
     statusBanner: {
         backgroundColor: '#FFF',

@@ -1,4 +1,24 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState } from "react";
+import { LogBox } from "react-native";
+
+// ── Silence non-blocking warnings that clutter the console ───────────────────
+LogBox.ignoreLogs([
+  // React Native / Expo Go native module warnings
+  'new NativeEventEmitter',
+  'EventEmitter.removeListener',
+  'componentWillReceiveProps',
+  'componentWillMount',
+  'VirtualizedLists should never be nested',
+  'Each child in a list should have a unique',
+  'Warning: Cannot update a component',
+  'Warning: Can\'t perform a React state update',
+  // Maps / Video / Push in Expo Go
+  'ExpoModulesCore',
+  'react-native-maps',
+  '[expo-notifications]',
+  'No native splash screen',
+  'Require cycle:',
+]);
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { NavigationContainer } from "@react-navigation/native";
@@ -6,11 +26,14 @@ import * as SplashScreen from "expo-splash-screen";
 import * as Font from "expo-font";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
+import { View } from "react-native";
 import AppNavigator from "./src/navigation/AppNavigator";
+import { EmergencyFAB } from "./src/components/EmergencyFAB";
 import { AuthProvider } from "./src/context/AuthContext";
 import { OfflineProvider } from "./src/context/OfflineContext";
 import { NotificationProvider } from "./src/context/NotificationContext";
 import { AccessibilityProvider } from "./src/context/AccessibilityContext";
+import { ThemeProvider } from "./src/context/ThemeContext";
 import ErrorBoundary from "./src/components/ErrorBoundary";
 import { navigationRef } from "./src/navigation/RootNavigation";
 
@@ -62,10 +85,15 @@ export default function App() {
             <AuthProvider>
               <NotificationProvider>
                 <AccessibilityProvider>
-                  <NavigationContainer ref={navigationRef}>
-                    <AppNavigator />
-                    <StatusBar style="auto" />
-                  </NavigationContainer>
+                  <ThemeProvider>
+                    <NavigationContainer ref={navigationRef}>
+                      <View style={{ flex: 1 }}>
+                        <AppNavigator />
+                        <EmergencyFAB />
+                      </View>
+                      <StatusBar style="auto" />
+                    </NavigationContainer>
+                  </ThemeProvider>
                 </AccessibilityProvider>
               </NotificationProvider>
             </AuthProvider>

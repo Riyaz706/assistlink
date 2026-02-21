@@ -74,6 +74,18 @@ export function useErrorHandler(): UseErrorHandlerReturn {
         };
     }, [extractErrorMessage]);
 
+    const clearError = useCallback(() => {
+        setError(null);
+    }, []);
+
+    const showErrorAlert = useCallback((errorDetails: ErrorDetails) => {
+        Alert.alert(
+            'Error',
+            errorDetails.message,
+            [{ text: 'OK', onPress: clearError }]
+        );
+    }, [clearError]);
+
     const handleError = useCallback((error: any, context?: string) => {
         const errorDetails = extractErrorDetails(error);
         if (context) errorDetails.type = context;
@@ -93,25 +105,11 @@ export function useErrorHandler(): UseErrorHandlerReturn {
             }
         });
 
+        // Always show popup so user sees every error
+        showErrorAlert(errorDetails);
+
         return errorDetails;
-    }, [extractErrorDetails]);
-
-    const clearError = useCallback(() => {
-        setError(null);
-    }, []);
-
-    const showErrorAlert = useCallback((errorDetails: ErrorDetails) => {
-        Alert.alert(
-            'Error',
-            errorDetails.message,
-            [
-                {
-                    text: 'OK',
-                    onPress: clearError
-                }
-            ]
-        );
-    }, [clearError]);
+    }, [extractErrorDetails, showErrorAlert]);
 
     return {
         error,
@@ -158,14 +156,40 @@ export async function retryOperation<T>(
 }
 
 /**
+ * Show a success popup (use for confirmations, saved, etc.)
+ */
+export function showSuccessAlert(message: string, title: string = 'Success'): void {
+    Alert.alert(title, message, [{ text: 'OK' }]);
+}
+
+/**
+ * Show an info popup (use for notices, tips, etc.)
+ */
+export function showInfoAlert(message: string, title: string = 'Info'): void {
+    Alert.alert(title, message, [{ text: 'OK' }]);
+}
+
+/**
+ * Show a generic popup (title + message).
+ */
+export function showAlert(title: string, message: string): void {
+    Alert.alert(title, message, [{ text: 'OK' }]);
+}
+
+/**
  * Check if error is a network error
  */
 export function isNetworkError(error: any): boolean {
+    if (error == null) return false;
+    const msg = (error?.message ?? '').toLowerCase();
     return (
         error?.code === 'ERR_NETWORK' ||
         error?.code === 'ECONNABORTED' ||
-        error?.message?.toLowerCase().includes('network') ||
-        error?.message?.toLowerCase().includes('connection')
+        error?.code === 'NETWORK_ERROR' ||
+        error?.code === 'TIMEOUT' ||
+        msg.includes('network') ||
+        msg.includes('connection') ||
+        msg.includes('timeout')
     );
 }
 

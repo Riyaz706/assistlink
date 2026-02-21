@@ -1,5 +1,10 @@
 from pydantic_settings import BaseSettings
 from typing import List, Optional
+import os
+
+# Always load .env from the directory this file lives in (backend/),
+# regardless of where the Python process was started.
+_ENV_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
 
 
 class Settings(BaseSettings):
@@ -24,7 +29,6 @@ class Settings(BaseSettings):
     VIDEO_CALL_DURATION_SECONDS: int = 15
     
     # Firebase Cloud Messaging (FCM) for Push Notifications
-    # Use Service Account JSON file path (recommended) or set GOOGLE_APPLICATION_CREDENTIALS env var
     FCM_SERVICE_ACCOUNT_PATH: Optional[str] = None  # Path to service account JSON file
     
     # Twilio Video Configuration
@@ -39,7 +43,7 @@ class Settings(BaseSettings):
     RAZORPAY_BYPASS_MODE: bool = False
     
     # Video Call Configuration
-    VIDEO_PROVIDER: str = "twilio" # Options: jitsi, twilio
+    VIDEO_PROVIDER: str = "webrtc"  # Options: jitsi, webrtc
     
     # Google OAuth Configuration
     GOOGLE_WEB_CLIENT_ID: Optional[str] = None
@@ -48,9 +52,14 @@ class Settings(BaseSettings):
     
     # Security Configuration
     SECRET_KEY: str = "default-secret-key-please-change"
+
+    # Backend Feature Kill Switches
+    ENABLE_TWILIO: bool = True
+    ENABLE_RAZORPAY: bool = True
+    ENABLE_PUSH_NOTIFICATIONS: bool = True
     
     class Config:
-        env_file = ".env"
+        env_file = _ENV_FILE
         case_sensitive = True
         extra = "ignore"  # Allow extra fields in .env file
 

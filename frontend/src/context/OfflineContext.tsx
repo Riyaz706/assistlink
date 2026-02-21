@@ -162,7 +162,9 @@ export const OfflineProvider = ({ children }: { children: ReactNode }) => {
                         <SafeAreaView edges={['bottom']}>
                             <View style={styles.bannerContent}>
                                 <Text style={styles.bannerText}>
-                                    {isSyncing ? 'Syncing offline actions...' : 'You are currently offline'}
+                                    {isSyncing
+                                        ? 'Syncing your changes...'
+                                        : "You're offline. Your actions will sync when you're back online."}
                                 </Text>
                             </View>
                         </SafeAreaView>
@@ -192,5 +194,7 @@ const styles = StyleSheet.create({
     bannerText: {
         color: '#FFFFFF',
         fontWeight: 'bold',
+        fontSize: 16,
+        textAlign: 'center',
     },
 });

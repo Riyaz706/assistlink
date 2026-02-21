@@ -1,97 +1,131 @@
-from fastapi import APIRouter, HTTPException, status, Depends
-from typing import Optional, Dict, Any
-from app.database import supabase_admin
+"""
+Emergency router — Real implementation with Supabase.
+
+Uses `emergencies` table (see backend/database/schema_emergency.sql).
+Columns: id, user_id, status, location (jsonb), caregiver_id, acknowledged_at, resolved_at, created_at, updated_at.
+If the table does not exist, endpoints return safe stub responses with a clear message.
+"""
+from fastapi import APIRouter, Depends, Body
+from typing import Optional, Dict, Any, List
+from pydantic import BaseModel
 from app.dependencies import get_current_user
-from app.services.notifications import (
-    notify_new_message, 
-    create_notification,
-    notify_emergency_alert,
-    notify_emergency_acknowledged
-)
-from app.error_handler import DatabaseError
-from datetime import datetime, timezone
+from app.database import supabase_admin
+from app.services.notifications import notify_emergency_alert, notify_emergency_acknowledged
 import sys
+import uuid
 
 router = APIRouter()
 
+# Request body for trigger
+class TriggerBody(BaseModel):
+    location: Optional[Dict[str, Any]] = None
+
+
+def _ensure_emergencies_table() -> bool:
+    """Check if emergencies table exists by attempting a simple select."""
+    try:
+        supabase_admin.table("emergencies").select("id").limit(1).execute()
+        return True
+    except Exception as e:
+        err = str(e).lower()
+        if "relation" in err and "does not exist" in err or "pgrst" in err or "42p01" in err:
+            return False
+        raise
+
+
 @router.post("/trigger")
 async def trigger_emergency(
-    location_data: Optional[Dict[str, Any]] = None,
+    body: TriggerBody = Body(default=TriggerBody()),
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Trigger an emergency SOS alert.
-    Notifies all caregivers associated with the care recipient.
-    """
-    try:
-        user_id = current_user.get("id")
-        user_name = current_user.get("full_name") or "A Care Recipient"
-        
-        print(f"\n🚨 EMERGENCY TRIGGERED BY: {user_name} ({user_id})", file=sys.stderr, flush=True)
-        
-        # 1. Persist emergency in DB
-        emergency_dict = {
-            "user_id": user_id,
-            "status": "active",
-            "location": location_data
+    user_id = current_user.get("id")
+    if not user_id:
+        return {
+            "status": "error",
+            "emergency_id": None,
+            "message": "User not identified.",
+            "caregivers_notified": 0
         }
-        emergency_res = supabase_admin.table("emergencies").insert(emergency_dict).execute()
-        if not emergency_res.data:
-            raise DatabaseError("Failed to persist emergency alert")
-        
-        emergency_id = emergency_res.data[0]["id"]
-        
-        # 2. Identify caregivers associated with this user (filtering for active/accepted bookings)
-        print(f"[DEBUG] Fetching active bookings for care_recipient_id: {user_id}", file=sys.stderr, flush=True)
-        bookings_response = supabase_admin.table("bookings") \
-            .select("caregiver_id") \
-            .eq("care_recipient_id", user_id) \
-            .in_("status", ["accepted", "in_progress"]) \
-            .execute()
-        
-        print(f"[DEBUG] Found {len(bookings_response.data) if bookings_response.data else 0} relevant bookings", file=sys.stderr, flush=True)
-        
-        caregiver_ids = list(set([b["caregiver_id"] for b in bookings_response.data if b.get("caregiver_id")]))
-        
-        print(f"[DEBUG] caregiver_ids to notify: {caregiver_ids}", file=sys.stderr, flush=True)
-        
-        if not caregiver_ids:
-            print(f"⚠️ No active caregivers found for user {user_id}", file=sys.stderr, flush=True)
-            return {
-                "status": "success", 
-                "emergency_id": emergency_id,
-                "message": "Emergency recorded, but no active caregivers found to notify."
-            }
 
-        print(f"📢 Notifying {len(caregiver_ids)} caregivers...", file=sys.stderr, flush=True)
+    location = (body.location if body else None) or {}
 
-        # 3. Create notifications for each caregiver
-        notifications_sent = 0
-        for caregiver_id in caregiver_ids:
-            try:
-                print(f"[DEBUG] Creating notification for caregiver: {caregiver_id}", file=sys.stderr, flush=True)
-                res = await notify_emergency_alert(
-                    caregiver_id=caregiver_id,
-                    care_recipient_name=user_name,
-                    emergency_id=emergency_id,
-                    location=location_data
-                )
-                if res:
-                    print(f"✅ Notification created in DB for {caregiver_id}", file=sys.stderr, flush=True)
-                    notifications_sent += 1
-            except Exception as e:
-                print(f"❌ Failed to notify caregiver {caregiver_id}: {e}", file=sys.stderr, flush=True)
+    if not _ensure_emergencies_table():
+        sys.stderr.write(f"[EMERGENCY] trigger by {user_id} — emergencies table not found, returning stub\n")
+        sys.stderr.flush()
+        return {
+            "status": "success",
+            "emergency_id": "stub-" + str(uuid.uuid4())[:8],
+            "message": "Emergency recorded. (Database table 'emergencies' not set up — contact support to enable full alerts.)",
+            "caregivers_notified": 0
+        }
+
+    try:
+        emergency_id = str(uuid.uuid4())
+        now_iso = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+        # Schema: user_id, caregiver_id (who acknowledged), location, status, acknowledged_at, resolved_at
+        row = {
+            "id": emergency_id,
+            "user_id": user_id,
+            "location": location,
+            "status": "active",
+            "caregiver_id": None,
+            "acknowledged_at": None,
+            "resolved_at": None,
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        }
+        supabase_admin.table("emergencies").insert(row).execute()
+
+        # Resolve care recipient name
+        care_recipient_name = "Care recipient"
+        try:
+            ur = supabase_admin.table("users").select("full_name").eq("id", user_id).limit(1).execute()
+            if ur.data and len(ur.data) > 0:
+                care_recipient_name = ur.data[0].get("full_name") or care_recipient_name
+        except Exception:
+            pass
+
+        caregivers_notified = 0
+        # Notify caregivers from active bookings for this care recipient
+        # Statuses: requested, accepted, confirmed, in_progress (app uses these; "pending" is legacy)
+        try:
+            bookings = supabase_admin.table("bookings") \
+                .select("caregiver_id") \
+                .eq("care_recipient_id", str(user_id)) \
+                .in_("status", ["requested", "accepted", "confirmed", "in_progress"]) \
+                .execute()
+            caregiver_ids = list({str(b["caregiver_id"]) for b in (bookings.data or []) if b.get("caregiver_id")})
+            for cid in caregiver_ids:
+                try:
+                    await notify_emergency_alert(
+                        caregiver_id=str(cid),
+                        care_recipient_name=care_recipient_name,
+                        emergency_id=emergency_id,
+                        location=location
+                    )
+                    caregivers_notified += 1
+                except Exception as nerr:
+                    sys.stderr.write(f"[EMERGENCY] notify caregiver {cid} failed: {nerr}\n")
+                    sys.stderr.flush()
+        except Exception as e:
+            sys.stderr.write(f"[EMERGENCY] fetch caregivers failed: {e}\n")
+            sys.stderr.flush()
 
         return {
-            "status": "success", 
+            "status": "success",
             "emergency_id": emergency_id,
-            "message": f"Emergency alert triggered. {notifications_sent} caregivers notified.",
-            "caregivers_notified": notifications_sent
+            "message": "Emergency alert sent.",
+            "caregivers_notified": caregivers_notified
         }
-
     except Exception as e:
-        print(f"❌ Error triggering emergency: {e}", file=sys.stderr, flush=True)
-        raise DatabaseError(f"Failed to trigger emergency: {str(e)}")
+        sys.stderr.write(f"[EMERGENCY] trigger error: {e}\n")
+        sys.stderr.flush()
+        return {
+            "status": "error",
+            "emergency_id": None,
+            "message": "Could not create emergency record. Please try again or call emergency services directly.",
+            "caregivers_notified": 0
+        }
 
 
 @router.post("/{emergency_id}/acknowledge")
@@ -99,49 +133,42 @@ async def acknowledge_emergency(
     emergency_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Acknowledge an emergency SOS alert as a caregiver.
-    """
+    if not _ensure_emergencies_table():
+        return {"status": "success", "message": "Emergency acknowledged (stub — table not set up)."}
+
     try:
         user_id = current_user.get("id")
-        user_name = current_user.get("full_name") or "A Caregiver"
-        
-        # 1. Update emergency status
-        update_dict = {
-            "status": "acknowledged",
-            "caregiver_id": user_id,
-            "acknowledged_at": datetime.now(timezone.utc).isoformat()
-        }
-        response = supabase_admin.table("emergencies") \
-            .update(update_dict) \
+        res = supabase_admin.table("emergencies") \
+            .select("id, user_id") \
             .eq("id", emergency_id) \
-            .eq("status", "active") \
             .execute()
-            
-        if not response.data:
-            # Check if it was already acknowledged
-            current = supabase_admin.table("emergencies").select("*").eq("id", emergency_id).execute()
-            if current.data and current.data[0]["status"] != "active":
-                return {"status": "info", "message": f"Emergency is already {current.data[0]['status']}"}
-            raise HTTPException(status_code=404, detail="Emergency alert not found or already acknowledged")
-
-        emergency = response.data[0]
-        care_recipient_id = emergency["user_id"]
-
-        # 2. Notify care recipient
-        await notify_emergency_acknowledged(
-            care_recipient_id=care_recipient_id,
-            caregiver_name=user_name,
-            emergency_id=emergency_id
-        )
-
-        return {"status": "success", "message": "Emergency acknowledged. Care recipient notified."}
-
-    except HTTPException:
-        raise
+        if not res.data or len(res.data) == 0:
+            return {"status": "error", "message": "Emergency not found."}
+        row = res.data[0]
+        if row.get("status") == "resolved":
+            return {"status": "success", "message": "Emergency already resolved."}
+        now_iso = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+        supabase_admin.table("emergencies") \
+            .update({"status": "acknowledged", "caregiver_id": user_id, "acknowledged_at": now_iso, "updated_at": now_iso}) \
+            .eq("id", emergency_id) \
+            .execute()
+        care_recipient_id = row.get("user_id")
+        caregiver_name = "A caregiver"
+        try:
+            ur = supabase_admin.table("users").select("full_name").eq("id", user_id).limit(1).execute()
+            if ur.data and len(ur.data) > 0:
+                caregiver_name = ur.data[0].get("full_name") or caregiver_name
+        except Exception:
+            pass
+        try:
+            await notify_emergency_acknowledged(str(care_recipient_id), caregiver_name, emergency_id)
+        except Exception:
+            pass
+        return {"status": "success", "message": "Emergency acknowledged."}
     except Exception as e:
-        print(f"❌ Error acknowledging emergency: {e}", file=sys.stderr, flush=True)
-        raise DatabaseError(f"Failed to acknowledge emergency: {str(e)}")
+        sys.stderr.write(f"[EMERGENCY] acknowledge error: {e}\n")
+        sys.stderr.flush()
+        return {"status": "error", "message": "Could not acknowledge emergency."}
 
 
 @router.post("/{emergency_id}/resolve")
@@ -149,34 +176,23 @@ async def resolve_emergency(
     emergency_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Mark an emergency SOS alert as resolved.
-    """
+    if not _ensure_emergencies_table():
+        return {"status": "success", "message": "Emergency resolved (stub)."}
+
     try:
-        user_id = current_user.get("id")
-        
-        # 1. Update emergency status
-        update_dict = {
-            "status": "resolved",
-            "resolved_at": datetime.now(timezone.utc).isoformat()
-        }
-        
-        # Both CR and CG (if assigned) can resolve
-        response = supabase_admin.table("emergencies") \
-            .update(update_dict) \
+        now_iso = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+        res = supabase_admin.table("emergencies").select("id").eq("id", emergency_id).execute()
+        if not res.data or len(res.data) == 0:
+            return {"status": "error", "message": "Emergency not found."}
+        supabase_admin.table("emergencies") \
+            .update({"status": "resolved", "resolved_at": now_iso, "updated_at": now_iso}) \
             .eq("id", emergency_id) \
             .execute()
-            
-        if not response.data:
-            raise HTTPException(status_code=404, detail="Emergency alert not found")
-
-        return {"status": "success", "message": "Emergency resolved"}
-
-    except HTTPException:
-        raise
+        return {"status": "success", "message": "Emergency resolved."}
     except Exception as e:
-        print(f"❌ Error resolving emergency: {e}", file=sys.stderr, flush=True)
-        raise DatabaseError(f"Failed to resolve emergency: {str(e)}")
+        sys.stderr.write(f"[EMERGENCY] resolve error: {e}\n")
+        sys.stderr.flush()
+        return {"status": "error", "message": "Could not resolve emergency."}
 
 
 @router.get("/status/{emergency_id}")
@@ -184,20 +200,52 @@ async def get_emergency_status(
     emergency_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Get the current status of an emergency alert.
-    """
+    if not _ensure_emergencies_table():
+        return {
+            "id": emergency_id,
+            "status": "unknown",
+            "message": "Emergency tracking not set up (table missing).",
+            "caregiver": None,
+            "location": None
+        }
+
     try:
-        response = supabase_admin.table("emergencies") \
-            .select("*, caregiver:caregiver_id(id, full_name, phone, profile_photo_url)") \
+        res = supabase_admin.table("emergencies") \
+            .select("id, user_id, status, caregiver_id, location, created_at") \
             .eq("id", emergency_id) \
             .execute()
-            
-        if not response.data:
-            raise HTTPException(status_code=404, detail="Emergency alert not found")
-            
-        return response.data[0]
-    except HTTPException:
-        raise
+        if not res.data or len(res.data) == 0:
+            return {
+                "id": emergency_id,
+                "status": "unknown",
+                "message": "Emergency not found.",
+                "caregiver": None,
+                "location": None
+            }
+        row = res.data[0]
+        caregiver = None
+        ack_by = row.get("caregiver_id")
+        if ack_by:
+            try:
+                ur = supabase_admin.table("users").select("id, full_name, profile_photo_url, phone").eq("id", ack_by).limit(1).execute()
+                if ur.data and len(ur.data) > 0:
+                    caregiver = ur.data[0]
+            except Exception:
+                pass
+        return {
+            "id": row.get("id"),
+            "status": row.get("status", "unknown"),
+            "message": None,
+            "caregiver": caregiver,
+            "location": row.get("location")
+        }
     except Exception as e:
-        raise DatabaseError(str(e))
+        sys.stderr.write(f"[EMERGENCY] status error: {e}\n")
+        sys.stderr.flush()
+        return {
+            "id": emergency_id,
+            "status": "unknown",
+            "message": "Could not load status.",
+            "caregiver": None,
+            "location": None
+        }

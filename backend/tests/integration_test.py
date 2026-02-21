@@ -1,11 +1,15 @@
+import os
 import requests
 import uuid
 import time
 import sys
 import json
 
-# Configuration
-BASE_URL = "http://localhost:8000"
+# Configuration: use env so CI/multi-device can inject shared backend URL
+BASE_URL = (os.getenv("API_BASE_URL") or os.getenv("BACKEND_URL") or "").rstrip("/")
+if not BASE_URL:
+    print("ERROR: Set API_BASE_URL (or BACKEND_URL) to your backend URL. Do not use localhost for multi-device testing.")
+    sys.exit(1)
 timestamp = int(time.time())
 EMAIL = f"test_user_{timestamp}@example.com"
 PASSWORD = "TestPassword123!"

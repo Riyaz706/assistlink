@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   Text,
@@ -10,7 +10,8 @@ import {
   Modal,
   Switch,
   Dimensions,
-  Alert
+  Alert,
+  ActivityIndicator
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -82,6 +83,7 @@ const MatchmakingScreen = ({ navigation }: any) => {
   // Selection Popup State
   const [selectionModalVisible, setSelectionModalVisible] = useState(false);
   const [selectedCaregiver, setSelectedCaregiver] = useState<any>(null);
+  const [slotStatus, setSlotStatus] = useState<'idle' | 'loading' | 'free' | 'busy'>('idle');
 
   // Booking Flow State: 'type' | 'success'
   const [bookingStep, setBookingStep] = useState<'type' | 'success'>('type');
@@ -160,6 +162,60 @@ const MatchmakingScreen = ({ navigation }: any) => {
       };
     }, [])
   );
+
+  // When modal is open and we have caregiver + date/time, check if slot is free or busy
+  useEffect(() => {
+    if (!selectionModalVisible || !selectedCaregiver || bookingStep !== 'type') {
+      setSlotStatus('idle');
+      return;
+    }
+    const isVideoCall = !serviceType || serviceType === 'video_call';
+    const dateToParse = serviceType === 'daily_care' ? dailyDateTime : examDateTime;
+    if (!dateToParse || typeof dateToParse !== 'string') {
+      setSlotStatus('idle');
+      return;
+    }
+    const when = parseDateTimeString(dateToParse);
+    if (!when) {
+      setSlotStatus('idle');
+      return;
+    }
+    let durationHours = 1;
+    if (!isVideoCall) {
+      const durationStr = serviceType === 'daily_care' ? dailyDuration : examDuration;
+      if (durationStr) {
+        const hoursMatch = durationStr.match(/(\d+)h/);
+        const minsMatch = durationStr.match(/(\d+)m/);
+        const hours = hoursMatch ? parseInt(hoursMatch[1], 10) : 0;
+        const mins = minsMatch ? parseInt(minsMatch[1], 10) : 0;
+        durationHours = hours + mins / 60;
+      }
+    } else {
+      durationHours = 15 / 3600;
+    }
+    const reqStart = when.getTime();
+    const reqEnd = reqStart + durationHours * 60 * 60 * 1000;
+    const dayStart = new Date(when);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(dayStart);
+    dayEnd.setDate(dayEnd.getDate() + 1);
+    // Widen range to catch bookings that overlap this day (start previous day, end next day)
+    const from = new Date(dayStart);
+    from.setDate(from.getDate() - 1);
+    const to = new Date(dayEnd);
+    to.setDate(to.getDate() + 1);
+    setSlotStatus('loading');
+    api.getCaregiverBusySlots(selectedCaregiver.id, from.toISOString(), to.toISOString())
+      .then((slots: { start: string; end: string }[]) => {
+        const overlaps = (slots || []).some((slot) => {
+          const s = new Date(slot.start).getTime();
+          const e = new Date(slot.end).getTime();
+          return reqStart < e && reqEnd > s;
+        });
+        setSlotStatus(overlaps ? 'busy' : 'free');
+      })
+      .catch(() => setSlotStatus('idle'));
+  }, [selectionModalVisible, selectedCaregiver, bookingStep, serviceType, examDateTime, dailyDateTime, examDuration, dailyDuration]);
 
   // --- LOGIC ---
   const getDisplayData = () => {
@@ -256,9 +312,31 @@ const MatchmakingScreen = ({ navigation }: any) => {
                   </Text>
                 </View>
 
+                {slotStatus === 'loading' && (
+                  <View style={styles.slotStatusRow}>
+                    <ActivityIndicator size="small" color="#059669" />
+                    <Text style={styles.slotStatusText}>Checking if this time is free…</Text>
+                  </View>
+                )}
+                {slotStatus === 'free' && (
+                  <View style={styles.slotStatusRow}>
+                    <Ionicons name="checkmark-circle" size={18} color="#059669" />
+                    <Text style={[styles.slotStatusText, { color: '#059669' }]}>This slot is free — you can book.</Text>
+                  </View>
+                )}
+                {slotStatus === 'busy' && (
+                  <View style={styles.slotStatusRow}>
+                    <Ionicons name="close-circle" size={18} color="#DC2626" />
+                    <Text style={[styles.slotStatusText, { color: '#DC2626' }]}>This time is already booked. Choose another time or caregiver.</Text>
+                  </View>
+                )}
                 <View style={styles.popupActions}>
                   <TouchableOpacity
-                    style={[styles.popupButton, { backgroundColor: '#059669', marginTop: 0 }]}
+                    style={[
+                      styles.popupButton,
+                      { backgroundColor: slotStatus === 'busy' || slotStatus === 'loading' ? '#9CA3AF' : '#059669', marginTop: 0 }
+                    ]}
+                    disabled={slotStatus === 'busy' || slotStatus === 'loading'}
                     onPress={async () => {
                       try {
                         console.log('📞 Creating request for caregiver:', selectedCaregiver.id);
@@ -319,15 +397,20 @@ const MatchmakingScreen = ({ navigation }: any) => {
                             duration_hours: durationHours,
                             location: bookingLocation,
                             specific_requirements: route.params?.specificRequirements || assistanceType, // Use specificRequirements
-                            urgency_level: route.params?.urgencyLevel || 'standard'
+                            urgency_level: route.params?.urgencyLevel || 'medium'
                           });
                         }
 
                         setBookingStep('success');
                       } catch (e: any) {
                         console.error('❌ Error creating request:', e);
-                        Alert.alert('Error', e?.message || 'Failed to create request. Please try again.');
-                        // Do not proceed to success on error
+                        const msg = e?.message || 'Failed to create request. Please try again.';
+                        if (msg.toLowerCase().includes('already booked')) {
+                          setSlotStatus('busy');
+                          Alert.alert('Slot no longer available', 'This time was just taken. Please choose another time or caregiver.');
+                        } else {
+                          Alert.alert('Error', msg);
+                        }
                       }
                     }}
                   >
@@ -365,7 +448,7 @@ const MatchmakingScreen = ({ navigation }: any) => {
           <View style={styles.cardInfo}>
             <View style={styles.rowBetween}>
               <Text style={styles.name}>{item.name}</Text>
-              <Text style={styles.price}>${item.price}<Text style={styles.perHour}>/hr</Text></Text>
+              <Text style={styles.price}>₹{item.price}<Text style={styles.perHour}>/hr</Text></Text>
             </View>
             <View style={styles.ratingRow}>
               <Ionicons name="star" size={14} color="#059669" />
@@ -586,6 +669,8 @@ const styles = StyleSheet.create({
   },
   popupTitle: { fontSize: 20, fontWeight: '800', color: '#111827', marginBottom: 8, textAlign: 'center' },
   popupSubtitle: { fontSize: 14, color: '#6B7280', textAlign: 'center', lineHeight: 20, paddingHorizontal: 10 },
+  slotStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12, paddingHorizontal: 4 },
+  slotStatusText: { fontSize: 14, color: '#374151' },
   popupActions: { width: '100%' },
   popupButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, borderRadius: 16, width: '100%' },
   popupButtonTitle: { fontSize: 16, fontWeight: '700', color: '#FFF' },

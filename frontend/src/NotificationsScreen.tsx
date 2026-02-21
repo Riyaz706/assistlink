@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, StatusBar, Dimensions, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, StatusBar, Dimensions, ActivityIndicator, Alert } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { api } from './api/client';
@@ -20,6 +20,22 @@ const COLORS = {
   red: '#FF4444'
 };
 
+/** Format notification created_at (ISO or date string) to readable date and time. */
+function formatNotificationDate(createdAt: string | undefined | null): string {
+  if (createdAt == null || createdAt === '') return '';
+  if (typeof createdAt !== 'string') return '';
+  // Already human-readable (e.g. from NotificationContext: "Feb 21, 2026 at 2:30 PM")
+  if (createdAt.includes(' at ') || !/^\d{4}-\d{2}-\d{2}/.test(createdAt)) return createdAt;
+  try {
+    const d = new Date(createdAt);
+    if (Number.isNaN(d.getTime())) return '';
+    const dateStr = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    const timeStr = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
+    return `${dateStr}, ${timeStr}`;
+  } catch {
+    return '';
+  }
+}
 
 const NotificationsScreen = ({ navigation }: any) => {
   const [activeTab, setActiveTab] = useState('All');
@@ -210,24 +226,36 @@ const NotificationsScreen = ({ navigation }: any) => {
               {content}
             </Text>
             <Text style={styles.timeText}>
-              {typeof createdAt === 'string' ? createdAt : ''}
+              {formatNotificationDate(createdAt)}
             </Text>
           </View>
         </View>
 
         {/* --- ACTIONS --- */}
-        {/* Booking Request Actions */}
-        {type === 'booking' && user?.role === 'caregiver' && item.title?.includes('New Booking') && (
+        {/* Booking Request Actions: hide when booking already completed/cancelled (if status is in payload) */}
+        {type === 'booking' &&
+          user?.role === 'caregiver' &&
+          item.title?.includes('New Booking') &&
+          !!item.data?.booking_id &&
+          !['completed', 'cancelled'].includes(item.data?.booking_status ?? '') ? (
           <View style={styles.actionRow}>
             <TouchableOpacity
               style={styles.acceptBtn}
               onPress={async () => {
                 try {
                   if (item.data?.booking_id) {
-                    await api.updateBooking(item.data.booking_id, { status: 'accepted' });
+                    await api.respondToBooking(item.data.booking_id, 'accepted');
                     await loadNotifications();
                   }
-                } catch (e) {
+                } catch (e: any) {
+                  if (e?.statusCode === 409) {
+                    Alert.alert(
+                      'Cannot Update',
+                      'This booking has already been completed or cancelled.',
+                      [{ text: 'OK', onPress: () => loadNotifications() }]
+                    );
+                    return;
+                  }
                   handleError(e, 'accept-booking');
                 }
               }}
@@ -239,10 +267,18 @@ const NotificationsScreen = ({ navigation }: any) => {
               onPress={async () => {
                 try {
                   if (item.data?.booking_id) {
-                    await api.updateBooking(item.data.booking_id, { status: 'declined' });
+                    await api.respondToBooking(item.data.booking_id, 'rejected');
                     await loadNotifications();
                   }
-                } catch (e) {
+                } catch (e: any) {
+                  if (e?.statusCode === 409) {
+                    Alert.alert(
+                      'Cannot Update',
+                      'This booking has already been completed or cancelled.',
+                      [{ text: 'OK', onPress: () => loadNotifications() }]
+                    );
+                    return;
+                  }
                   handleError(e, 'decline-booking');
                 }
               }}
@@ -250,25 +286,30 @@ const NotificationsScreen = ({ navigation }: any) => {
               <Text style={{ color: '#666', fontWeight: '600' }}>Decline</Text>
             </TouchableOpacity>
           </View>
-        )}
+        ) : null}
 
         {/* Legacy Request Actions (if any) */}
         {type === 'request' && (
           <View style={styles.actionRow}>
-            <TouchableOpacity style={styles.acceptBtn}>
+            <TouchableOpacity
+              style={styles.acceptBtn}
+              onPress={() => Alert.alert('Booking Requests', 'To accept or decline booking requests, please open the booking from the Bookings tab.')}
+            >
               <Text style={styles.acceptBtnText}>Accept Request</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.closeBtn}>
+            <TouchableOpacity
+              style={styles.closeBtn}
+              onPress={() => Alert.alert('Booking Requests', 'To decline booking requests, please open the booking from the Bookings tab.')}
+            >
               <Ionicons name="close" size={20} color="#666" />
             </TouchableOpacity>
           </View>
         )}
         {type === 'video_call' &&
           user?.role === 'caregiver' &&
-          item.data?.video_call_id &&
-          // Show actions only while request is still pending and caregiver hasn't accepted/declined
+          !!item.data?.video_call_id &&
           (item.data?.status === 'pending' || item.status === 'pending' || (!item.data?.status && !item.status)) &&
-          !item.data?.caregiver_accepted && (
+          !item.data?.caregiver_accepted ? (
             <View style={styles.actionRow}>
               <TouchableOpacity
                 style={styles.acceptBtn}
@@ -297,7 +338,7 @@ const NotificationsScreen = ({ navigation }: any) => {
                 <Ionicons name="close" size={20} color="#666" />
               </TouchableOpacity>
             </View>
-          )}
+          ) : null}
       </TouchableOpacity>
     );
   };
@@ -412,6 +453,9 @@ const styles = StyleSheet.create({
     borderBottomColor: '#F0F0F0',
   },
   backButton: {
+    minWidth: 48,
+    minHeight: 48,
+    justifyContent: 'center',
     paddingRight: 10,
   },
   headerTitle: {
@@ -584,6 +628,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   closeBtn: {
+    minWidth: 48,
+    minHeight: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
     padding: 8,
     borderRadius: 8,
     borderWidth: 1,

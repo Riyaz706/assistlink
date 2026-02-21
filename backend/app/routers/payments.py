@@ -23,7 +23,8 @@ from app.error_handler import (
     AuthorizationError,
     NotFoundError,
     ValidationError,
-    DatabaseError
+    DatabaseError,
+    ConflictError,
 )
 from app.routers.bookings import validate_booking_transition
 
@@ -337,7 +338,7 @@ async def create_payment_order(
                 sys.stderr.flush()
                 raise DatabaseError(f"Failed to create Razorpay order: {str(e)}")
         
-    except (HTTPException, NotFoundError, AuthorizationError, DatabaseError):
+    except (HTTPException, NotFoundError, AuthorizationError, DatabaseError, ValidationError, ConflictError):
         raise
     except Exception as e:
         import traceback
@@ -539,7 +540,7 @@ async def verify_payment(
             chat_session_id=chat_session_id
         )
     
-    except (HTTPException, NotFoundError, AuthorizationError, DatabaseError, ValidationError):
+    except (HTTPException, NotFoundError, AuthorizationError, DatabaseError, ValidationError, ConflictError):
         raise
     except Exception as e:
         import traceback

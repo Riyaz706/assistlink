@@ -4,7 +4,7 @@ Provides validators for common data types and formats
 """
 import re
 from typing import Optional
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from pydantic import validator
 
 
@@ -18,9 +18,11 @@ def validate_email(email: str) -> str:
     """Validate email format"""
     if not email:
         raise ValueError("Email is required")
-    
+
     email = email.strip().lower()
-    
+    if not email:
+        raise ValueError("Email is required")
+
     if not EMAIL_REGEX.match(email):
         raise ValueError("Invalid email format")
     
@@ -132,8 +134,10 @@ def validate_currency(currency: str) -> str:
 
 def validate_future_datetime(dt: datetime, min_hours_ahead: int = 1) -> datetime:
     """Validate that datetime is in the future"""
-    now = datetime.utcnow()
-    
+    now = datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+
     if dt <= now:
         raise ValueError("Date and time must be in the future")
     
@@ -169,14 +173,11 @@ def validate_role(role: str) -> str:
 
 
 def validate_booking_status(status: str) -> str:
-    """Validate booking status"""
-    valid_statuses = ["pending", "confirmed", "in_progress", "completed", "cancelled"]
-    
+    """Validate booking status (aligned with API/schemas: pending, accepted, rejected, in_progress, completed, cancelled, missed)."""
+    valid_statuses = ["pending", "accepted", "rejected", "confirmed", "in_progress", "completed", "cancelled", "missed"]
     status = status.lower().strip()
-    
     if status not in valid_statuses:
         raise ValueError(f"Invalid status. Must be one of: {', '.join(valid_statuses)}")
-    
     return status
 
 

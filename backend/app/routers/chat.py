@@ -1,11 +1,12 @@
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from app.schemas import MessageCreate, MessageResponse, ChatSessionResponse
 from app.database import supabase, supabase_admin
 from app.dependencies import get_current_user
 from app.services.notifications import notify_new_message
 from app.error_handler import (
+    AppError,
     NotFoundError,
     AuthorizationError,
     DatabaseError,
@@ -161,14 +162,16 @@ async def get_messages(
         if not chat_session["is_enabled"]:
             raise AuthorizationError("Chat session is not enabled")
         
-        # Get messages using admin client to bypass RLS
-        query = supabase_admin.table("messages").select("*, sender:sender_id(*), recipient:recipient_id(*)").eq("chat_session_id", chat_session_id).order("created_at", desc=False).range(offset, offset + limit - 1)
+        # Get messages using admin client to bypass RLS (select only fields needed for MessageResponse to avoid embed/validation issues)
+        query = supabase_admin.table("messages").select("id, chat_session_id, sender_id, recipient_id, content, message_type, attachment_url, read_at, created_at").eq("chat_session_id", chat_session_id).order("created_at", desc=False).range(offset, offset + limit - 1)
         
         response = query.execute()
         
         return response.data or []
     
     except HTTPException:
+        raise
+    except AppError:
         raise
     except Exception as e:
         raise DatabaseError(str(e))
@@ -248,6 +251,8 @@ async def send_message(
     
     except HTTPException:
         raise
+    except AppError:
+        raise
     except Exception as e:
         raise DatabaseError(str(e))
 
@@ -306,6 +311,8 @@ async def mark_messages_as_read(
         return {"message": "Messages marked as read"}
     
     except HTTPException:
+        raise
+    except AppError:
         raise
     except Exception as e:
         raise DatabaseError(str(e))

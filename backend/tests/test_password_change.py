@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
 """
 Test script for password change endpoint
-Usage: ./test_password_change.py <email> <current_password> <new_password>
+Usage: API_BASE_URL=http://<LAN_IP>:8000 ./test_password_change.py <email> <current_password> <new_password>
 """
 
+import os
 import sys
 import requests
 import json
 
-def test_password_change(email, current_password, new_password):
+BASE_URL = (os.getenv("API_BASE_URL") or os.getenv("BACKEND_URL") or "").rstrip("/")
+if not BASE_URL:
+    print("ERROR: Set API_BASE_URL (or BACKEND_URL) to your backend URL (e.g. http://192.168.1.5:8000). Do not use localhost for multi-device testing.")
+    sys.exit(1)
+
+def run_password_change_test(email, current_password, new_password):
     # First, login to get a token
     print(f"1. Logging in as {email}...")
     login_response = requests.post(
-        "http://localhost:8000/api/auth/login",
+        f"{BASE_URL}/api/auth/login",
         json={"email": email, "password": current_password}
     )
     
@@ -28,7 +34,7 @@ def test_password_change(email, current_password, new_password):
     # Now try to change password
     print(f"\n2. Attempting to change password...")
     change_response = requests.post(
-        "http://localhost:8000/api/auth/change-password",
+        f"{BASE_URL}/api/auth/change-password",
         headers={"Authorization": f"Bearer {token}"},
         json={
             "current_password": current_password,
@@ -45,7 +51,7 @@ def test_password_change(email, current_password, new_password):
         # Try logging in with new password
         print(f"\n3. Testing login with new password...")
         test_login = requests.post(
-            "http://localhost:8000/api/auth/login",
+            f"{BASE_URL}/api/auth/login",
             json={"email": email, "password": new_password}
         )
         
@@ -56,7 +62,7 @@ def test_password_change(email, current_password, new_password):
             print(f"\n4. Changing password back to original...")
             token2 = test_login.json().get("access_token")
             revert_response = requests.post(
-                "http://localhost:8000/api/auth/change-password",
+                f"{BASE_URL}/api/auth/change-password",
                 headers={"Authorization": f"Bearer {token2}"},
                 json={
                     "current_password": new_password,
@@ -84,5 +90,5 @@ if __name__ == "__main__":
     current_password = sys.argv[2]
     new_password = sys.argv[3]
     
-    success = test_password_change(email, current_password, new_password)
+    success = run_password_change_test(email, current_password, new_password)
     sys.exit(0 if success else 1)

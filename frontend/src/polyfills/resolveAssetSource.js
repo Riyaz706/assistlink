@@ -105,19 +105,34 @@
     // Module patching failed - continue with direct patching
   }
 
-  // Try to patch immediately with static requires (correct path for React Native 0.81+)
-  // The actual file is at Libraries/Image/resolveAssetSource.js (not src/Libraries)
+  // Prefer public API to avoid "Deep imports from 'react-native' are deprecated" warning
+  let patched = false;
   try {
-    // eslint-disable-next-line import/no-unresolved
-    const resolveAssetSource = require('react-native/Libraries/Image/resolveAssetSource');
+    const RN = require('react-native');
+    const resolveAssetSource = RN.Image?.resolveAssetSource || (RN.default?.Image?.resolveAssetSource);
     if (resolveAssetSource) {
-      patchResolveAssetSource(resolveAssetSource);
+      patched = patchResolveAssetSource(resolveAssetSource) || patched;
       if (resolveAssetSource.default) {
-        patchResolveAssetSource(resolveAssetSource.default);
+        patched = patchResolveAssetSource(resolveAssetSource.default) || patched;
       }
     }
   } catch (e1) {
-    // Path not available yet - will be patched via Module._load hook
-    // This is OK, the Module._load hook will catch it when it loads
+    // Public API not available
+  }
+  // Fallback: when react-native-maps loads the deep path, Module._load above will patch it.
+  // Only use deep require if public API was not available (avoids deprecation when possible).
+  if (!patched) {
+    try {
+      // eslint-disable-next-line import/no-unresolved
+      const resolveAssetSource = require('react-native/Libraries/Image/resolveAssetSource');
+      if (resolveAssetSource) {
+        patchResolveAssetSource(resolveAssetSource);
+        if (resolveAssetSource.default) {
+          patchResolveAssetSource(resolveAssetSource.default);
+        }
+      }
+    } catch (e2) {
+      // Will be patched via Module._load when something else loads it
+    }
   }
 })();

@@ -271,36 +271,3 @@ async def unregister_device(
             detail=f"Error unregistering device: {str(e)}"
         )
 
-@router.post("/test")
-async def create_test_notification(current_user: dict = Depends(get_current_user)):
-    """Create a test notification for the current user"""
-    import sys
-    try:
-        user_id = current_user.get("id")
-        print(f"\n[DEBUG] create_test_notification called for user: {user_id}", file=sys.stderr, flush=True)
-        
-        notification_dict = {
-            "user_id": str(user_id),
-            "type": "system",
-            "title": "System Test",
-            "message": "This is a test notification to verify the dashboard is working.",
-            "is_read": False,
-            "data": {"test": True}
-        }
-        
-        print(f"[DEBUG] Inserting into 'notifications' table: {notification_dict}", file=sys.stderr, flush=True)
-        response = supabase_admin.table("notifications").insert(notification_dict).execute()
-        
-        print(f"[DEBUG] Supabase response: {response}", file=sys.stderr, flush=True)
-        print(f"[DEBUG] Supabase response data: {response.data}", file=sys.stderr, flush=True)
-        
-        if not response.data:
-            print("[ERROR] No data returned from Supabase insert!", file=sys.stderr, flush=True)
-            return {"status": "error", "message": "No data returned from Supabase insert"}
-
-        return {"status": "success", "notification": response.data[0]}
-    except Exception as e:
-        print(f"[ERROR] Exception in create_test_notification: {str(e)}", file=sys.stderr, flush=True)
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))

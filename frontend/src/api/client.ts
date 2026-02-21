@@ -1,15 +1,107 @@
-// API URL: env var, Constants.extra, or fallback to Render production
-function getApiBaseUrl(): string {
-  const fromEnv = process.env.EXPO_PUBLIC_API_BASE_URL;
-  if (fromEnv) return fromEnv.replace(/\/$/, ''); // strip trailing slash
-  try {
-    const Constants = require('expo-constants').default;
-    const fromExtra = Constants.expoConfig?.extra?.apiBaseUrl || Constants.expoConfig?.extra?.EXPO_PUBLIC_API_BASE_URL;
-    if (fromExtra) return String(fromExtra).replace(/\/$/, '');
-  } catch { }
-  return 'https://assistlink-backend.onrender.com';
+// Centralized config: no localhost/127.0.0.1/10.0.2.2 — all devices must use shared reachable URL.
+const { getApiBaseUrlFromEnv, validateNoLoopback, logNetworkFailure } = require('../config/network');
+
+function getDefaultApiBaseUrl(): string {
+  return getApiBaseUrlFromEnv();
 }
-const API_BASE_URL = getApiBaseUrl();
+
+// Mutable base URL so user can change it in Settings when IP changes (no rebuild needed)
+let currentBaseUrl = getDefaultApiBaseUrl();
+
+const API_OVERRIDE_KEY = 'assistlink_api_base_url_override';
+
+async function loadApiBaseUrlOverride(): Promise<void> {
+  try {
+    const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+    const override = await AsyncStorage.getItem(API_OVERRIDE_KEY);
+    if (override && override.trim()) {
+      currentBaseUrl = override.trim().replace(/\/$/, '');
+      if (typeof window !== 'undefined') {
+        console.log(`[API] Using override Base URL: ${currentBaseUrl}`);
+      }
+    }
+    const validation = validateNoLoopback(currentBaseUrl);
+    if (!validation.valid) {
+      console.error(`[API] ${validation.message}`);
+    }
+  } catch {
+    // ignore
+  }
+}
+
+/** Resolve before first API call so auth restore uses override if set */
+export const apiConfigReady = loadApiBaseUrlOverride();
+
+/** Get the URL currently used for API requests */
+export function getCurrentApiBaseUrl(): string {
+  return currentBaseUrl;
+}
+
+/** Get the default URL from env/build (before any override) */
+export function getDefaultApiUrl(): string {
+  return getDefaultApiBaseUrl();
+}
+
+/**
+ * Check if the backend is reachable (GET /health). Use to verify app–backend connection.
+ * Uses current base URL (or optional urlOverride to test a URL before saving).
+ */
+export async function checkBackendConnection(urlOverride?: string | null): Promise<{ ok: boolean; message?: string }> {
+  const base = urlOverride != null && urlOverride.trim() ? urlOverride.trim().replace(/\/$/, '') : currentBaseUrl;
+  const url = `${base}/health`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  try {
+    const res = await fetch(url, { method: 'GET', signal: controller.signal });
+    clearTimeout(timeoutId);
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && (data?.status === 'ok' || data?.message)) {
+      return { ok: true, message: data.message || 'Backend is reachable.' };
+    }
+    return { ok: false, message: data?.message || `Backend returned ${res.status}` };
+  } catch (e: any) {
+    clearTimeout(timeoutId);
+    const msg = e?.name === 'AbortError'
+      ? 'Request timed out. Is the backend running and reachable at this URL?'
+      : (e?.message || 'Network error. Check URL, Wi‑Fi, and that backend is running.');
+    return { ok: false, message: msg };
+  }
+}
+
+/**
+ * Set or clear backend URL override. Use when your machine's IP changes so the app
+ * can reach the backend without rebuilding. Pass null or '' to use default again.
+ */
+export async function setApiBaseUrlOverride(url: string | null): Promise<void> {
+  const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+  if (!url || !url.trim()) {
+    await AsyncStorage.removeItem(API_OVERRIDE_KEY);
+    currentBaseUrl = getDefaultApiBaseUrl();
+    if (typeof window !== 'undefined') {
+      console.log(`[API] Cleared override, using default: ${currentBaseUrl}`);
+    }
+  } else {
+    const u = url.trim().replace(/\/$/, '');
+    await AsyncStorage.setItem(API_OVERRIDE_KEY, u);
+    currentBaseUrl = u;
+    if (typeof window !== 'undefined') {
+      console.log(`[API] Override set to: ${currentBaseUrl}`);
+    }
+  }
+}
+
+// ── Global Request Deduplication Lock ────────────────────────────────────────
+// Prevents API spam: if identical GET requests fire concurrently, they share
+// one in-flight promise instead of issuing N parallel requests.
+const _inflight = new Map<string, Promise<any>>();
+
+export function deduplicatedRequest<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  if (_inflight.has(key)) return _inflight.get(key) as Promise<T>;
+  const promise = fn().finally(() => _inflight.delete(key));
+  _inflight.set(key, promise);
+  return promise;
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
@@ -17,9 +109,14 @@ import { Platform } from 'react-native';
 const TOKEN_KEY = 'assistlink_token';
 const REFRESH_TOKEN_KEY = 'assistlink_refresh_token';
 
-// Log the API base URL on initialization (helps debug connection issues)
+// Startup: validate and log BASE_URL (never use localhost/127.0.0.1/10.0.2.2 for multi-device testing)
 if (typeof window !== 'undefined') {
-  console.log(`[API] API Base URL: ${API_BASE_URL}`);
+  const validation = validateNoLoopback(currentBaseUrl);
+  if (validation.valid) {
+    console.log(`[API] Base URL: ${currentBaseUrl}`);
+  } else {
+    console.error(`[API] ${validation.message}`);
+  }
 }
 
 let accessToken: string | null = null;
@@ -80,6 +177,15 @@ async function request<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
+  if (!currentBaseUrl || !currentBaseUrl.trim()) {
+    const err: any = new Error(
+      'API base URL is not set. Set EXPO_PUBLIC_API_BASE_URL in .env to your backend URL (LAN IP for multi-device testing, e.g. http://192.168.1.x:8000, or production HTTPS).'
+    );
+    err.code = 'CONFIG';
+    logNetworkFailure('request', err, currentBaseUrl || '(empty)');
+    throw err;
+  }
+
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options.headers as any),
@@ -98,12 +204,15 @@ async function request<T>(
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const url = `${API_BASE_URL}${path}`;
+  const url = `${currentBaseUrl}${path}`;
   console.log(`[API] Making ${options.method || 'GET'} request to: ${url}`);
 
-  // Set timeout for requests (30 seconds)
+  // Timeout: longer for auth (startup/restore) and for list endpoints (cold backend/Supabase can be slow)
+  const isAuthEndpoint = path === '/api/auth/me' || path === '/api/auth/refresh' || path.startsWith('/api/auth/login');
+  const isListEndpoint = path === '/api/caregivers' || path.startsWith('/api/caregivers?');
+  const timeoutMs = isAuthEndpoint ? 60000 : isListEndpoint ? 45000 : 30000;
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const res = await fetch(url, {
@@ -153,9 +262,13 @@ async function request<T>(
       error.details = errorDetails;
       error.requestId = requestId;
 
-      // Add diagnostic info
+      // Add diagnostic info (409 is expected for terminal-state conflicts, log as warn)
       const diagnosticMsg = `API Error [${res.status}${requestId ? ` - ${requestId}` : ''}] at ${url}: ${errorMessage}`;
-      console.error(`[API] ${diagnosticMsg}`);
+      if (res.status === 409) {
+        console.warn(`[API] ${diagnosticMsg}`);
+      } else {
+        console.error(`[API] ${diagnosticMsg}`);
+      }
 
       if (errorDetails) {
         console.error(`[API] Error details:`, errorDetails);
@@ -187,7 +300,7 @@ async function request<T>(
           console.log('[API] Token expired, attempting refresh...');
           // Call refresh endpoint - assuming /api/auth/refresh exists and takes refresh_token body or header
           // NOTE: Using a fresh fetch here to avoid circular dependency or interceptor loop
-          const refreshRes = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
+          const refreshRes = await fetch(`${currentBaseUrl}/api/auth/refresh`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ refresh_token: refreshToken })
@@ -224,6 +337,8 @@ async function request<T>(
           }
         } catch (refreshError) {
           console.error('[API] Error during token refresh:', refreshError);
+          setAccessToken(null);
+          await setRefreshToken(null).catch(() => {});
         }
       }
     }
@@ -233,7 +348,7 @@ async function request<T>(
       const timeoutError: any = new Error('Request timeout. Please check your internet connection and try again.');
       timeoutError.code = 'TIMEOUT';
       timeoutError.statusCode = 408;
-      console.error(`[API] Request timeout for ${path}`);
+      logNetworkFailure(`Request timeout for ${path}`, timeoutError, `${currentBaseUrl}${path}`);
       throw timeoutError;
     }
 
@@ -246,7 +361,7 @@ async function request<T>(
     );
 
     if (isNetwork) {
-      console.error(`[API] Network error for ${path}`);
+      logNetworkFailure(`Network error for ${path}`, error, `${currentBaseUrl}${path}`);
 
       const method = options.method || 'GET';
       if (offlineHandler && isSyncable(path, method)) {
@@ -408,11 +523,6 @@ export const api = {
       method: "DELETE",
     }),
 
-  createTestNotification: () =>
-    request("/api/notifications/test", {
-      method: "POST",
-    }),
-
   // Caregivers
   listCaregivers: (params: {
     availability_status?: string;
@@ -431,6 +541,10 @@ export const api = {
     return request(`/api/caregivers${query}`);
   },
 
+  /** Busy slots for a caregiver in a date range (accepted/confirmed/in_progress). Use before booking to show free vs busy. */
+  getCaregiverBusySlots: (caregiverId: string, fromIso: string, toIso: string) =>
+    request<{ start: string; end: string }[]>(`/api/caregivers/${caregiverId}/busy-slots?from_date=${encodeURIComponent(fromIso)}&to_date=${encodeURIComponent(toIso)}`),
+
   // Video call (short intro call)
   createVideoCallRequest: (data: {
     caregiver_id: string;
@@ -444,6 +558,13 @@ export const api = {
         scheduled_time: data.scheduled_time,
         duration_seconds: data.duration_seconds ?? 15,
       }),
+    }),
+
+  /** Start an instant video call from an existing chat session (either party can start). */
+  createVideoCallFromChat: (chatSessionId: string) =>
+    request<{ id: string; video_call_url?: string }>("/api/bookings/video-call/from-chat", {
+      method: "POST",
+      body: JSON.stringify({ chat_session_id: chatSessionId }),
     }),
 
   acceptVideoCallRequest: (videoCallId: string, accept: boolean) =>
@@ -471,6 +592,11 @@ export const api = {
   getVideoCallRequest: (videoCallId: string) =>
     request(`/api/bookings/video-call/${videoCallId}`),
 
+  completeVideoCall: (bookingId: string) =>
+    request(`/api/bookings/video-call/${bookingId}/complete`, {
+      method: "POST",
+    }),
+
   // Bookings
   createBooking: (data: {
     service_type: "exam_assistance" | "daily_care" | "one_time" | "recurring" | "urgent_care" | string;
@@ -489,6 +615,9 @@ export const api = {
     }),
 
 
+
+  getBooking: (bookingId: string) =>
+    request<any>(`/api/bookings/${bookingId}`),
 
   updateBooking: (bookingId: string, data: { status?: string;[key: string]: any }) =>
     request(`/api/bookings/${bookingId}`, {
@@ -513,10 +642,10 @@ export const api = {
     if (subscriptionHandle) clearInterval(subscriptionHandle);
   },
 
-  cancelBooking: (bookingId: string) =>
-    request(`/api/bookings/${bookingId}`, {
+  cancelBooking: (bookingId: string, reason?: string) =>
+    request(`/api/bookings/${bookingId}/status`, {
       method: "PATCH",
-      body: JSON.stringify({ status: "cancelled" }),
+      body: JSON.stringify({ status: "cancelled", reason }),
     }),
 
   respondToBooking: (bookingId: string, status: "accepted" | "rejected", reason?: string) =>
@@ -601,17 +730,18 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  // Twilio Video
+  // Video call room info (WebRTC uses room_name as signaling room ID; token unused)
   getVideoToken: (bookingId: string) =>
-    request<{ token: string; room_name: string; identity: string }>("/api/communications/video/token", {
+    request<{ token: string | null; room_name: string; identity: string }>("/api/communications/video/token", {
       method: "POST",
       body: JSON.stringify({ booking_id: bookingId }),
     }),
 
 
-  // Bookings
-  completePayment: (bookingId: string) =>
-    request(`/api/bookings/${bookingId}/complete-payment`, {
+  // Bookings: complete-payment is not a backend route; use payments/verify for payment completion.
+  // This method is kept for backwards compatibility but points to video-call complete (backend accepts booking_id or video_call_id).
+  completePayment: (id: string) =>
+    request(`/api/bookings/video-call/${id}/complete`, {
       method: "POST",
     }),
 
@@ -712,3 +842,37 @@ export const api = {
 };
 
 
+// ── Global Safe API Wrapper ───────────────────────────────────────────────────
+/**
+ * safeApi(fn, fallback?)
+ *
+ * Wraps any api.* call so that 404 / 500 errors are caught silently.
+ * - 401 → re-throws so AuthContext can handle logout
+ * - 404 → returns fallback (default null), logs warn
+ * - 500 → returns fallback (default null), logs warn
+ * - network error → returns fallback, logs warn
+ *
+ * Usage:
+ *   const data = await safeApi(() => api.getDashboardStats(), null);
+ */
+export async function safeApi<T>(
+  fn: () => Promise<T>,
+  fallback: T | null = null
+): Promise<T | null> {
+  try {
+    return await fn();
+  } catch (err: any) {
+    const status = err?.statusCode ?? err?.status ?? 0;
+    // 401 must propagate so AuthContext can force logout
+    if (status === 401) throw err;
+    // 404 / 500 / network — swallow and return fallback
+    if (status === 404) {
+      console.warn(`[safeApi] 404 Not Found — returning fallback`);
+    } else if (status >= 500) {
+      console.warn(`[safeApi] ${status} Server Error — returning fallback: ${err?.message}`);
+    } else {
+      console.warn(`[safeApi] Error (${status}) — returning fallback: ${err?.message}`);
+    }
+    return fallback;
+  }
+}

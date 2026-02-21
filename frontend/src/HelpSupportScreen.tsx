@@ -97,9 +97,24 @@ const HelpSupportScreen = ({ navigation }: any) => {
 
         <Text style={styles.sectionTitle}>RESOURCES</Text>
         <View style={styles.card}>
-          <Item icon="play-circle" label="Video tutorials" onPress={() => { }} />
-          <Item icon="book-open-variant" label="User manual" onPress={() => { }} />
-          <Item icon="file-document-outline" label="Terms of Service" onPress={() => Linking.openURL('https://example.com/terms')} />
+          <Item
+            icon="play-circle"
+            label="Video tutorials"
+            onPress={() => Alert.alert('Coming soon', 'Video tutorials will be available in a future update.')}
+          />
+          <Item
+            icon="book-open-variant"
+            label="User manual"
+            onPress={() => Alert.alert('Coming soon', 'The user manual will be available in a future update.')}
+          />
+          <Item
+            icon="file-document-outline"
+            label="Terms of Service"
+            onPress={() => {
+              const termsUrl = 'https://assistlink.app/terms';
+              Linking.openURL(termsUrl).catch(() => Alert.alert('Error', 'Could not open Terms of Service.'));
+            }}
+          />
         </View>
 
         <Text style={styles.sectionTitle}>CONTACT SUPPORT</Text>

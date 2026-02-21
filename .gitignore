@@ -7,3 +7,6 @@ dist/
 # Environment files
 *.env
 *.env.*
+
+# Local bug reports / artifacts
+bugreport-*.zip

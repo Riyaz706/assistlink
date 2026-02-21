@@ -99,9 +99,7 @@ AssistLink connects care recipients with trained caregivers, with a primary focu
    uvicorn app.main:app --host 0.0.0.0 --port 8000
    ```
 
-   The API will be available at `http://localhost:8000`
-   API documentation (Swagger UI) will be available at `http://localhost:8000/docs`
-   Alternative API documentation (ReDoc) will be available at `http://localhost:8000/redoc`
+   On your machine: API at `http://localhost:8000`, Swagger at `http://localhost:8000/docs`, ReDoc at `http://localhost:8000/redoc`. **Mobile app and multi-device testing:** set `EXPO_PUBLIC_API_BASE_URL` to your LAN IP or production URL (never localhost). See `docs/NETWORK_RULES.md`.
 
 ## MVP Features
 

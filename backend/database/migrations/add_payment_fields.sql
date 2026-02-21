@@ -5,7 +5,7 @@
 ALTER TABLE bookings 
 ADD COLUMN IF NOT EXISTS amount DECIMAL(10, 2),
 ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'INR',
-ADD COLUMN IF NOT EXISTS payment_status TEXT DEFAULT 'pending' CHECK (payment_status IN ('pending', 'initiated', 'processing', 'completed', 'failed', 'refunded')),
+ADD COLUMN IF NOT EXISTS payment_status TEXT DEFAULT 'pending' CHECK (payment_status IN ('pending', 'initiated', 'processing', 'completed', 'captured', 'failed', 'refunded')),
 ADD COLUMN IF NOT EXISTS razorpay_order_id TEXT UNIQUE,
 ADD COLUMN IF NOT EXISTS razorpay_payment_id TEXT,
 ADD COLUMN IF NOT EXISTS razorpay_signature TEXT,
