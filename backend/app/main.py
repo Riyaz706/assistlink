@@ -163,6 +163,24 @@ async def health_check():
     }
 
 
+@app.get("/health/db/env")
+async def health_check_db_env():
+    """Debug: is DATABASE_URL set and does it look like pooler (6543) or direct (5432)? No DB connection."""
+    import os
+    raw = os.getenv("DATABASE_URL") or ""
+    url = raw.strip()
+    if not url:
+        return {"DATABASE_URL_set": False, "hint": "Set DATABASE_URL in Render to the pooler URI (port 6543)."}
+    is_pooler = "6543" in url and "pooler" in url.lower()
+    is_direct = "5432" in url or "db." in url.split("@")[-1].split("/")[0] if "@" in url else False
+    return {
+        "DATABASE_URL_set": True,
+        "using_pooler": is_pooler,
+        "avoid_direct": not ("5432" in url or "db." in (url.split("@")[-1].split("/")[0] if "@" in url else "")),
+        "hint": "Use pooler (port 6543). Remove SUPABASE_DB_PASSWORD from Render." if not is_pooler else "OK",
+    }
+
+
 @app.get("/health/db")
 async def health_check_db():
     """Test direct DB pool (Postgres). Returns error detail if pool fails (e.g. wrong DATABASE_URL)."""

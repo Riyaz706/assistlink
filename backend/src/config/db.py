@@ -45,11 +45,10 @@ def get_db_pool() -> psycopg2.pool.SimpleConnectionPool:
         raise DatabaseConnectionError(f"Database connection failed: {_pool_error}")
 
     if _connection_pool is None:
-        database_url = None
-        if settings and hasattr(settings, 'DATABASE_URL'):
-            database_url = settings.DATABASE_URL
-        if not database_url:
-            database_url = os.getenv("DATABASE_URL")
+        # Prefer os.environ so Render/env vars are always used (Settings can be cached)
+        database_url = os.getenv("DATABASE_URL") or (settings.DATABASE_URL if (settings and hasattr(settings, "DATABASE_URL")) else None) or None
+        if database_url:
+            database_url = database_url.strip() or None
 
         try:
             if database_url:
