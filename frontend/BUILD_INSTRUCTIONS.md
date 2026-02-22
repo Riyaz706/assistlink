@@ -67,4 +67,15 @@ Make sure:
 - Try different USB cables/ports
 - Run `adb devices` to verify device is detected
 
+### "device 'adb-ef13f485-...' not found" (wireless debugging)
+This happens when the phone is connected via **Wireless debugging** instead of USB. Expo/ADB use the device serial with `-s`, which often fails over wireless.
+
+**Fix: use USB for development builds**
+1. On the phone: **Settings → Developer options → Wireless debugging** → turn **Off**.
+2. Connect the phone with a **USB cable**.
+3. Run `adb devices` — you should see the device with a USB serial (not `adb-ef13f485-...`).
+4. Run `npm run android` (or `npx expo run:android`).
+
+**If you can’t use USB:** use **Expo Go** instead: run `npm start`, then scan the QR code with Expo Go on the phone (same Wi‑Fi). No native build required.
+
 

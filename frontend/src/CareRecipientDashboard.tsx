@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Image,
   ScrollView,
+  RefreshControl,
   StatusBar,
   Platform,
   Modal,
@@ -149,7 +150,7 @@ const CareRecipientDashboard = () => {
   const [menuVisible, setMenuVisible] = useState(false);
   const scaleValue = useRef(new Animated.Value(0)).current;
 
-  const loadCurrentBookings = async () => {
+  const loadCurrentBookings = async (isRetry = false) => {
     try {
       setLoadingBookings(true);
       // Load active bookings directly from API
@@ -212,6 +213,18 @@ const CareRecipientDashboard = () => {
         setUnratedBooking(null);
       }
     } catch (e: any) {
+      const msg = (e?.message || '').toLowerCase();
+      const isTemporary =
+        msg.includes('temporarily unavailable') ||
+        msg.includes('try again in a moment') ||
+        e?.statusCode === 503 ||
+        e?.code === 'TIMEOUT' ||
+        e?.statusCode === 408;
+      if (!isRetry && isTemporary) {
+        // Backend may be cold-starting (e.g. Render). Retry once after a short delay.
+        setTimeout(() => loadCurrentBookings(true), 3000);
+        return;
+      }
       handleError(e, 'load-bookings');
     } finally {
       setLoadingBookings(false);
@@ -421,7 +434,18 @@ const CareRecipientDashboard = () => {
       </Modal>
 
       <View style={styles.contentWrap}>
-        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        <ScrollView
+          style={styles.scrollView}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={loadingBookings}
+              onRefresh={loadCurrentBookings}
+              colors={[GREEN]}
+            />
+          }
+        >
 
         {/* HEADER - Hamburger (PRD) + Date/Title + Notifications */}
         <View style={styles.headerRow}>

@@ -179,7 +179,7 @@ async function request<T>(
 ): Promise<T> {
   if (!currentBaseUrl || !currentBaseUrl.trim()) {
     const err: any = new Error(
-      'API base URL is not set. Set EXPO_PUBLIC_API_BASE_URL in .env to your backend URL (LAN IP for multi-device testing, e.g. http://192.168.1.x:8000, or production HTTPS).'
+      'API base URL is not set. Set EXPO_PUBLIC_API_BASE_URL in .env to your backend URL (e.g. https://assistlink-backend-1qjd.onrender.com).'
     );
     err.code = 'CONFIG';
     logNetworkFailure('request', err, currentBaseUrl || '(empty)');
@@ -262,6 +262,7 @@ async function request<T>(
         errorMessage.includes("Network is unreachable") ||
         (errorMessage.includes("db.") && errorMessage.includes("supabase.co") && errorMessage.includes("5432"))
       )) {
+        console.warn(`[API] Backend returned ${res.status}; original message: ${errorMessage}`);
         errorMessage = "Service is temporarily unavailable. Please try again in a moment.";
       }
 

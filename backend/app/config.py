@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from pydantic import field_validator
 from typing import List, Optional
 import os
 
@@ -41,6 +42,15 @@ class Settings(BaseSettings):
     RAZORPAY_KEY_ID: Optional[str] = None
     RAZORPAY_KEY_SECRET: Optional[str] = None
     RAZORPAY_BYPASS_MODE: bool = False
+
+    @field_validator("RAZORPAY_BYPASS_MODE", mode="before")
+    @classmethod
+    def parse_bypass_mode(cls, v):
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str):
+            return v.strip().lower() in ("true", "1", "yes")
+        return False
     
     # Video Call Configuration
     VIDEO_PROVIDER: str = "webrtc"  # Options: jitsi, webrtc
