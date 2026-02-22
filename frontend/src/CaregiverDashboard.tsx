@@ -19,6 +19,7 @@ import { useAuth } from './context/AuthContext';
 import { useNotification } from './context/NotificationContext';
 import { api } from './api/client';
 import { useErrorHandler } from './hooks/useErrorHandler';
+import BottomNav from './BottomNav';
 
 const { width } = Dimensions.get('window');
 
@@ -167,7 +168,10 @@ const CaregiverDashboard = ({ navigation }: { navigation: any }) => {
       {activeEmergency && (
         <TouchableOpacity
           style={styles.sosBanner}
-          onPress={() => navigation.navigate('EmergencyScreen', { notification: activeEmergency })}
+          onPress={() => navigation.navigate('EmergencyScreen', {
+            emergency_id: activeEmergency.data?.emergency_id,
+            notification: activeEmergency,
+          })}
         >
           <View style={styles.sosBannerContent}>
             <View style={styles.sosIconContainer}>
@@ -242,12 +246,7 @@ const CaregiverDashboard = ({ navigation }: { navigation: any }) => {
             <Text style={styles.upcomingEmptySubtext}>New bookings and video calls will appear here</Text>
           </View>
         ) : (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.horizontalList}
-            accessibilityLabel={`${upcomingAssignments.length} upcoming assignment(s). Swipe to see more.`}
-          >
+          <View style={styles.assignmentsList} accessibilityLabel={`${upcomingAssignments.length} upcoming assignment(s).`}>
             {upcomingAssignments.map((item) => (
               <TouchableOpacity
                 key={item.id}
@@ -284,63 +283,12 @@ const CaregiverDashboard = ({ navigation }: { navigation: any }) => {
                 </View>
               </TouchableOpacity>
             ))}
-          </ScrollView>
+          </View>
         )}
 
       </ScrollView>
 
-      {/* Bottom Nav */}
-      <RNSafeAreaView style={styles.bottomNavSafeArea} edges={['bottom']}>
-        <View style={styles.bottomNav}>
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => navigation.navigate('CaregiverDashboard')}
-          >
-            <Icon
-              name={isActive('CaregiverDashboard') ? "home" : "home-outline"}
-              size={28}
-              color={isActive('CaregiverDashboard') ? THEME.primary : "#666"}
-            />
-            <Text style={[styles.navText, isActive('CaregiverDashboard') && styles.activeNavText]}>Home</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => navigation.navigate('ScheduleScreen2')}
-          >
-            <Icon
-              name={isActive('ScheduleScreen2') ? "calendar-clock" : "calendar-clock-outline"}
-              size={28}
-              color={isActive('ScheduleScreen2') ? THEME.primary : "#666"}
-            />
-            <Text style={[styles.navText, isActive('ScheduleScreen2') && styles.activeNavText]}>Schedule</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => navigation.navigate('ChatList2')}
-          >
-            <Icon
-              name={isActive('ChatList2') ? "message-text" : "message-text-outline"}
-              size={28}
-              color={isActive('ChatList2') ? THEME.primary : "#666"}
-            />
-            <Text style={[styles.navText, isActive('ChatList2') && styles.activeNavText]}>Messages</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => navigation.navigate('ProfileScreen2')}
-          >
-            <Icon
-              name={isActive('ProfileScreen2') ? "account-circle" : "account-circle-outline"}
-              size={28}
-              color={isActive('ProfileScreen2') ? THEME.primary : "#666"}
-            />
-            <Text style={[styles.navText, isActive('ProfileScreen2') && styles.activeNavText]}>Profile</Text>
-          </TouchableOpacity>
-        </View>
-      </RNSafeAreaView>
+      <BottomNav />
     </RNSafeAreaView >
   );
 };
@@ -381,11 +329,11 @@ const styles = StyleSheet.create({
   sectionHeaderActions: { flexDirection: 'row', alignItems: 'center' },
   seeAllText: { color: THEME.primary, fontWeight: '700', marginLeft: 12 },
 
-  horizontalList: { overflow: 'visible', marginBottom: 25 },
+  assignmentsList: { marginBottom: 25 },
   upcomingEmpty: { padding: 24, alignItems: 'center', backgroundColor: '#FFF', borderRadius: 16, marginBottom: 8 },
   upcomingEmptyText: { color: THEME.textGray, fontSize: 14, marginTop: 8 },
   upcomingEmptySubtext: { color: '#9CA3AF', fontSize: 12, marginTop: 4 },
-  assignmentCard: { backgroundColor: '#FFF', width: width * 0.75, padding: 15, borderRadius: 16, marginRight: 15, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5 },
+  assignmentCard: { backgroundColor: '#FFF', width: '100%', alignSelf: 'stretch', padding: 15, borderRadius: 16, marginBottom: 12, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5 },
   assignmentHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
   clientAvatar: { width: 40, height: 40, borderRadius: 20, marginRight: 10 },
   clientAvatarPlaceholder: {

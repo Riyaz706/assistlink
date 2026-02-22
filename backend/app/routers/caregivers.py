@@ -8,6 +8,17 @@ from app.dependencies import get_current_user, get_optional_user, verify_caregiv
 router = APIRouter()
 
 
+def _normalize_profile(raw_profile):
+    """Handle Supabase relationships that may return a dict or a list."""
+    if not raw_profile:
+        return None
+    if isinstance(raw_profile, list):
+        return raw_profile[0] if raw_profile else None
+    if isinstance(raw_profile, dict):
+        return raw_profile
+    return None
+
+
 @router.post("/profile", response_model=CaregiverProfileResponse, status_code=status.HTTP_201_CREATED)
 async def create_caregiver_profile(
     profile_data: CaregiverProfileCreate,
@@ -203,16 +214,6 @@ async def list_caregivers(
         if all_caregivers:
             first_caregiver = all_caregivers[0]
             print(f"[DEBUG] First caregiver structure - caregiver_profile type: {type(first_caregiver.get('caregiver_profile'))}, value: {first_caregiver.get('caregiver_profile')}", flush=True)
-
-        def _normalize_profile(raw_profile):
-            """Handle Supabase relationships that may return a dict or a list."""
-            if not raw_profile:
-                return None
-            if isinstance(raw_profile, list):
-                return raw_profile[0] if raw_profile else None
-            if isinstance(raw_profile, dict):
-                return raw_profile
-            return None
 
         # Filter by availability status
         # First, filter by availability_status if specified, otherwise show all active caregivers
@@ -529,17 +530,22 @@ async def get_caregiver(
     caregiver_id: str,
     current_user: Optional[dict] = Depends(get_optional_user)
 ):
-    """Get caregiver details by ID"""
+    """Get caregiver details by ID (for care recipients viewing a caregiver profile). Uses admin client so RLS does not block."""
     try:
-        response = supabase.table("users").select("*, caregiver_profile(*)").eq("id", caregiver_id).eq("role", "caregiver").execute()
+        response = supabase_admin.table("users").select("*, caregiver_profile(*)").eq("id", caregiver_id).eq("role", "caregiver").eq("is_active", True).execute()
         
         if not response.data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Caregiver not found"
             )
-        
-        return response.data[0]
+        row = response.data[0]
+        # Normalize caregiver_profile to a single object for consistent API shape
+        raw = row.get("caregiver_profile")
+        row["caregiver_profile"] = _normalize_profile(raw)
+        return row
+    except HTTPException:
+        raise
     except Exception as e:
         if "not found" in str(e).lower():
             raise HTTPException(

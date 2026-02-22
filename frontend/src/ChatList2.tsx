@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import BottomNav from './BottomNav';
 import { Ionicons, MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { api } from './api/client';
 import { useAuth } from './context/AuthContext';
@@ -160,6 +161,7 @@ export default function ChatList2({ navigation }: any) {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <View style={styles.contentWrap}>
       <StatusBar barStyle="dark-content" backgroundColor={THEME.bg} />
 
       <View style={styles.header}>
@@ -213,12 +215,15 @@ export default function ChatList2({ navigation }: any) {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         />
       )}
+      </View>
+      <BottomNav />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: THEME.bg },
+  contentWrap: { flex: 1 },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',

@@ -16,12 +16,14 @@ from app.error_handler import (
     DatabaseError, ValidationError, ConflictError, log_error, AppError
 )
 from app.services.notifications import (
+    create_notification,
     notify_video_call_request,
     notify_video_call_created_for_recipient,
     notify_video_call_accepted,
     notify_video_call_status_change,
     notify_booking_created,
     notify_booking_status_change,
+    update_notifications_booking_status,
     notify_chat_enabled,
     notify_video_call_joined
 )
@@ -836,27 +838,31 @@ async def complete_video_call(
                 "completed_at": now_iso,
                 "updated_at": now_iso,
             }).eq("id", id).execute()
-            # Update linked booking if any
-            bk_res = supabase_admin.table("bookings").select("id").eq("video_call_request_id", id).limit(1).execute()
+            # Update linked booking to completed only if it is in_progress (valid transition)
+            bk_res = supabase_admin.table("bookings").select("id, status").eq("video_call_request_id", id).limit(1).execute()
             if bk_res.data and len(bk_res.data) > 0:
-                supabase_admin.table("bookings").update({
-                    "status": "completed",
-                    "completed_at": now_iso,
-                    "updated_at": now_iso,
-                }).eq("id", bk_res.data[0]["id"]).execute()
+                bk = bk_res.data[0]
+                if bk.get("status") == "in_progress":
+                    supabase_admin.table("bookings").update({
+                        "status": "completed",
+                        "completed_at": now_iso,
+                        "updated_at": now_iso,
+                    }).eq("id", bk["id"]).execute()
             return {"status": "completed", "video_call_id": id}
 
         # 2) Try as booking id
-        bk_res = supabase_admin.table("bookings").select("id, video_call_request_id, care_recipient_id, caregiver_id").eq("id", id).execute()
+        bk_res = supabase_admin.table("bookings").select("id, status, video_call_request_id, care_recipient_id, caregiver_id").eq("id", id).execute()
         if bk_res.data and len(bk_res.data) > 0:
             bk = bk_res.data[0]
             if uid not in [str(bk.get("care_recipient_id", "")), str(bk.get("caregiver_id", ""))]:
                 raise AuthorizationError("Access denied")
-            supabase_admin.table("bookings").update({
-                "status": "completed",
-                "completed_at": now_iso,
-                "updated_at": now_iso,
-            }).eq("id", id).execute()
+            # Only transition booking to completed if currently in_progress (valid transition)
+            if bk.get("status") == "in_progress":
+                supabase_admin.table("bookings").update({
+                    "status": "completed",
+                    "completed_at": now_iso,
+                    "updated_at": now_iso,
+                }).eq("id", id).execute()
             vc_id = bk.get("video_call_request_id")
             if vc_id:
                 supabase_admin.table("video_call_requests").update({
@@ -1029,7 +1035,11 @@ def validate_booking_transition(current_status: str, new_status: str, user_role:
         if is_possible_somehow:
              raise AuthorizationError(f"Role '{user_role}' is not authorized to transition from '{current_status}' to '{new_status}'")
         else:
-             raise ConflictError(f"Transition from '{current_status}' to '{new_status}' is invalid")
+            if new_status == "completed":
+                raise ConflictError(
+                    f"Booking can only be marked completed when the visit is in progress. Current status: '{current_status}'."
+                )
+            raise ConflictError(f"Transition from '{current_status}' to '{new_status}' is invalid")
 
 
 # --- HELPER ---
@@ -1485,9 +1495,12 @@ async def respond_to_booking(
         
         await _log_booking_history(booking_id, booking["status"], new_status, user_id, response_data.reason)
         
-        # Notify Care Recipient
+        # Notify Care Recipient (ensure caregiver name for notification)
         try:
-            caregiver_name = current_user.get("full_name", "Caregiver")
+            caregiver_name = current_user.get("full_name")
+            if not caregiver_name:
+                name_res = supabase_admin.table("users").select("full_name").eq("id", user_id).limit(1).execute()
+                caregiver_name = (name_res.data[0].get("full_name") or "Caregiver") if name_res.data else "Caregiver"
             await notify_booking_status_change(
                 user_id=booking["care_recipient_id"],
                 booking_id=booking_id,
@@ -1497,6 +1510,39 @@ async def respond_to_booking(
         except Exception as e:
             print(f"[WARN] Failed to notify status change: {e}", flush=True)
 
+        # Update caregiver's "New Booking Request" notification so it shows Accepted/Declined
+        try:
+            await update_notifications_booking_status(
+                booking_id, new_status, user_ids=[str(booking["caregiver_id"])]
+            )
+        except Exception as e:
+            print(f"[WARN] Failed to update notification booking_status: {e}", flush=True)
+
+        # Send a dedicated accepted/cancelled notification to the caregiver so they see it in the list
+        try:
+            care_recipient_name = "Care Recipient"
+            cr_res = supabase_admin.table("users").select("full_name").eq("id", booking["care_recipient_id"]).limit(1).execute()
+            if cr_res.data and len(cr_res.data) > 0:
+                care_recipient_name = cr_res.data[0].get("full_name") or care_recipient_name
+            if new_status == "accepted":
+                await create_notification(
+                    user_id=str(booking["caregiver_id"]),
+                    notification_type="booking",
+                    title="Booking Accepted",
+                    body=f"You accepted the booking request from {care_recipient_name}.",
+                    data={"booking_id": booking_id, "booking_status": "accepted", "action": "view_booking"}
+                )
+            else:
+                await create_notification(
+                    user_id=str(booking["caregiver_id"]),
+                    notification_type="booking",
+                    title="Booking Declined",
+                    body=f"You declined the booking request from {care_recipient_name}.",
+                    data={"booking_id": booking_id, "booking_status": "cancelled", "action": "view_booking"}
+                )
+        except Exception as e:
+            print(f"[WARN] Failed to create caregiver accept/decline notification: {e}", flush=True)
+
         return updated_booking
 
     except HTTPException:
@@ -1504,6 +1550,11 @@ async def respond_to_booking(
     except AppError:
         raise
     except Exception as e:
+        err_str = str(e).lower()
+        if "23p01" in err_str or "prevent_caregiver_double_booking" in err_str or "exclusion constraint" in err_str:
+            raise ConflictError(
+                "You're already booked for an overlapping time. This slot conflicts with another accepted or confirmed booking. Please decline this request or ask the care recipient to choose a different time."
+            )
         raise DatabaseError(f"Error responding to booking: {str(e)}")
 
 
@@ -1518,15 +1569,15 @@ async def update_booking_status(
     - Enforces state transitions.
     """
     try:
-        user_id = current_user.get("id")
+        user_id = str(current_user.get("id") or "")
         user_role = current_user.get("role")
-        
-        # If JWT role is generic 'authenticated', fetch actual role from users table
-        if user_role == 'authenticated':
-            user_data = supabase.table("users").select("role").eq("id", user_id).execute()
-            if user_data.data:
-                user_role = user_data.data[0]["role"]
-        
+        if not user_role or user_role == "authenticated":
+            role_res = supabase_admin.table("users").select("role").eq("id", user_id).limit(1).execute()
+            if role_res.data and len(role_res.data) > 0:
+                user_role = role_res.data[0].get("role")
+        if user_role not in ("care_recipient", "caregiver"):
+            user_role = "care_recipient"
+
         res = supabase_admin.table("bookings").select("*").eq("id", booking_id).execute()
         if not res.data:
             raise NotFoundError("Booking not found")
@@ -1575,6 +1626,16 @@ async def update_booking_status(
                 )
         except Exception as e:
              print(f"[WARN] Failed to notify: {e}", flush=True)
+
+        # Update all notifications for this booking so they show correct status and don't appear as "new request"
+        try:
+            await update_notifications_booking_status(
+                booking_id,
+                new_status,
+                user_ids=[str(booking["caregiver_id"]), str(booking["care_recipient_id"])],
+            )
+        except Exception as e:
+            print(f"[WARN] Failed to update notification booking_status: {e}", flush=True)
 
         return updated_booking
 

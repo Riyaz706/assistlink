@@ -15,7 +15,7 @@
 |------|--------|
 | `frontend/src/config/network.ts` | **New.** Centralized `getApiBaseUrlFromEnv()`, `validateNoLoopback()`, `logNetworkFailure()`, `getAppEnvironment()`. No loopback substitution. |
 | `frontend/src/api/client.ts` | Removed all localhost/10.0.2.2 rewriting. Base URL from `getApiBaseUrlFromEnv()`. Startup validation with `validateNoLoopback()`. Request guard and `logNetworkFailure()` on timeout/errors. |
-| `frontend/.env` | Replaced `EXPO_PUBLIC_API_BASE_URL=http://localhost:8000` with production default `https://assistlink-backend.onrender.com` and added `EXPO_PUBLIC_APP_ENV=development`. |
+| `frontend/.env` | Replaced `EXPO_PUBLIC_API_BASE_URL=http://localhost:8000` with production default `https://assistlink-backend-1qjd.onrender.com` and added `EXPO_PUBLIC_APP_ENV=development`. |
 | `frontend/.env.example` | **New.** Documents `EXPO_PUBLIC_API_BASE_URL` (LAN IP or production), `EXPO_PUBLIC_APP_ENV`, and rule: never use localhost/127.0.0.1/10.0.2.2. |
 | `frontend/app.config.js` | No code change; already uses production fallback when env unset (no localhost). |
 
@@ -56,7 +56,7 @@
 | Context | Variable | Source | Allowed values |
 |---------|----------|--------|-----------------|
 | **Frontend (app)** | `EXPO_PUBLIC_API_BASE_URL` | `frontend/.env` or app.config.js `extra` | LAN IP (e.g. `http://192.168.1.x:8000`), tunnel URL, or production HTTPS. **Never** localhost/127.0.0.1/10.0.2.2. |
-| **Frontend default** | — | `frontend/app.config.js` / `network.ts` | When env unset and production: `https://assistlink-backend.onrender.com`. Dev/staging: no default (empty); validation fails if unset. |
+| **Frontend default** | — | `frontend/app.config.js` / `network.ts` | When env unset and production: `https://assistlink-backend-1qjd.onrender.com`. Dev/staging: no default (empty); validation fails if unset. |
 | **Backend scripts/tests** | `API_BASE_URL` or `BACKEND_URL` | Environment | Same reachable URL (LAN IP or production). Must be set for runs; no default to loopback. |
 
 **Single source of truth (frontend):** `frontend/src/config/network.ts` — `getApiBaseUrlFromEnv()`, validated with `validateNoLoopback()` at startup and when loading override in `client.ts`.

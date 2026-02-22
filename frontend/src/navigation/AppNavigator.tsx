@@ -1,6 +1,7 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuth } from '../context/AuthContext';
+import { useNotifications } from '../hooks/useNotifications';
 
 // Auth Screens
 import LoginScreen from '../LoginScreen';
@@ -45,6 +46,7 @@ const Stack = createNativeStackNavigator();
 
 const AppNavigator = () => {
     const { user, loading } = useAuth();
+    useNotifications();
 
     if (loading) {
         return (
@@ -55,7 +57,16 @@ const AppNavigator = () => {
     }
 
     return (
-        <Stack.Navigator id="MainStack" screenOptions={{ headerShown: false }}>
+        <Stack.Navigator
+            id="MainStack"
+            screenOptions={{
+                headerShown: false,
+                animation: 'slide_from_right',
+                gestureEnabled: true,
+                fullScreenGestureEnabled: true,
+                animationTypeForReplace: 'push',
+            }}
+        >
             {!user ? (
                 // Auth Stack
                 <>

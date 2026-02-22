@@ -16,6 +16,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { Calendar } from 'react-native-calendars';
 import { api } from './api/client';
 import { useAuth } from './context/AuthContext';
+import { useErrorHandler } from './hooks/useErrorHandler';
+import BottomNav from './BottomNav';
 
 const THEME = {
   primary: '#059669',
@@ -35,29 +37,39 @@ const SERVICE_LABELS: Record<string, string> = {
 
 export default function ScheduleScreen2({ navigation }: any) {
   const { user } = useAuth();
+  const { handleError, error, clearError } = useErrorHandler();
   const [videoCalls, setVideoCalls] = useState<any[]>([]);
   const [bookings, setBookings] = useState<any[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [calendarVisible, setCalendarVisible] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // Date range: 'date' = selected date only, 'week' = week containing selected date, 'all' = all dates
+  const [dateRange, setDateRange] = useState<'date' | 'week' | 'all'>('date');
+  // Type filter: 'all' | 'assignments' | 'video_calls'
+  const [typeFilter, setTypeFilter] = useState<'all' | 'assignments' | 'video_calls'>('all');
+  // Status filter: 'all' | 'pending' | 'confirmed' | 'in_progress' | 'completed'
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'confirmed' | 'in_progress' | 'completed'>('all');
 
   const fetchData = async () => {
     try {
-      setLoading(true);
+      if (!refreshing) setLoading(true);
+      clearError();
       const [videoCallsData, bookingsData] = await Promise.all([
         api.getDashboardVideoCalls({ limit: 100 }),
         api.getDashboardBookings({
-          status: 'requested,pending,accepted,in_progress', // include requested so caregiver sees new requests
-          upcoming_only: true,
+          status: 'requested,pending,accepted,confirmed,in_progress',
+          upcoming_only: false,
           limit: 50,
         }),
       ]);
-      setVideoCalls(Array.isArray(videoCallsData) ? videoCallsData : []);
-      setBookings(Array.isArray(bookingsData) ? bookingsData : []);
+      const vcList = Array.isArray(videoCallsData) ? videoCallsData : [];
+      const bkList = Array.isArray(bookingsData) ? bookingsData : [];
+      setVideoCalls(vcList);
+      setBookings(bkList);
     } catch (e: any) {
       console.error("Failed to fetch schedule data:", e);
-      Alert.alert("Error", "Failed to load schedule. Please pull to refresh.");
+      handleError(e, 'schedule-load');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -140,47 +152,86 @@ export default function ScheduleScreen2({ navigation }: any) {
 
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
 
-  // Filter by selected date; always include requests (requested status or no date) so they show in schedule
+  // Week bounds for selected date (Sun–Sat)
+  const weekStartEnd = useMemo(() => {
+    const d = new Date(selectedDate + 'T12:00:00Z');
+    const day = d.getUTCDay();
+    const start = new Date(d);
+    start.setUTCDate(d.getUTCDate() - day);
+    const end = new Date(start);
+    end.setUTCDate(start.getUTCDate() + 6);
+    return {
+      startStr: start.toISOString().split('T')[0],
+      endStr: end.toISOString().split('T')[0],
+    };
+  }, [selectedDate]);
+
+  const sortEntries = useCallback((entries: ScheduleEntry[]) => {
+    return [...entries].sort((a, b) => {
+      const aReq = (a.item.status || '').toLowerCase() === 'requested';
+      const bReq = (b.item.status || '').toLowerCase() === 'requested';
+      if (aReq && !bReq) return -1;
+      if (!aReq && bReq) return 1;
+      const timeA = a.item.scheduled_date || a.item.scheduled_time;
+      const timeB = b.item.scheduled_date || b.item.scheduled_time;
+      if (!timeA) return 1;
+      if (!timeB) return -1;
+      return new Date(timeA).getTime() - new Date(timeB).getTime();
+    });
+  }, []);
+
+  // 1) Apply type filter (all | assignments | video_calls)
+  const typeFilteredEntries = useMemo(() => {
+    if (typeFilter === 'all') return scheduleEntries;
+    if (typeFilter === 'assignments') return scheduleEntries.filter((e) => e.type === 'booking');
+    return scheduleEntries.filter((e) => e.type === 'video_call');
+  }, [scheduleEntries, typeFilter]);
+
+  // 2) Apply status filter
+  const statusMatches = (entry: ScheduleEntry, statusKey: string) => {
+    const s = (entry.item.status || '').toLowerCase();
+    if (statusKey === 'pending') return s === 'requested' || s === 'pending';
+    if (statusKey === 'confirmed') return s === 'accepted' || s === 'confirmed';
+    if (statusKey === 'in_progress') return s === 'in_progress';
+    if (statusKey === 'completed') return s === 'completed';
+    return true;
+  };
+  const statusFilteredEntries = useMemo(() => {
+    if (statusFilter === 'all') return typeFilteredEntries;
+    return typeFilteredEntries.filter((e) => statusMatches(e, statusFilter));
+  }, [typeFilteredEntries, statusFilter]);
+
+  // 3) Filter by date range; include undated/requested when viewing selected date or week
   const filteredScheduleItems = useMemo(() => {
     const isRequest = (entry: ScheduleEntry) => (entry.item.status || '').toLowerCase() === 'requested' || !entry.scheduleDate;
-    const forDate = scheduleEntries.filter((entry) => {
-      if (entry.scheduleDate === selectedDate) return true;
-      if (!entry.scheduleDate && selectedDate === todayStr) return true;
-      if (isRequest(entry)) return true; // always show requests regardless of selected date
-      return false;
-    }).sort((a, b) => {
-      const aReq = (a.item.status || '').toLowerCase() === 'requested';
-      const bReq = (b.item.status || '').toLowerCase() === 'requested';
-      if (aReq && !bReq) return -1;
-      if (!aReq && bReq) return 1;
-      const timeA = a.item.scheduled_date || a.item.scheduled_time;
-      const timeB = b.item.scheduled_date || b.item.scheduled_time;
-      if (!timeA) return 1;
-      if (!timeB) return -1;
-      return new Date(timeA).getTime() - new Date(timeB).getTime();
-    });
-    return forDate;
-  }, [scheduleEntries, selectedDate, todayStr]);
+    let forDate: ScheduleEntry[];
+    if (dateRange === 'all') {
+      forDate = statusFilteredEntries;
+    } else if (dateRange === 'week') {
+      forDate = statusFilteredEntries.filter((entry) => {
+        if (!entry.scheduleDate && isRequest(entry)) return true;
+        if (!entry.scheduleDate) return false;
+        return entry.scheduleDate >= weekStartEnd.startStr && entry.scheduleDate <= weekStartEnd.endStr;
+      });
+    } else {
+      forDate = statusFilteredEntries.filter((entry) => {
+        if (entry.scheduleDate === selectedDate) return true;
+        if (!entry.scheduleDate && selectedDate === todayStr) return true;
+        if (isRequest(entry)) return true;
+        return false;
+      });
+    }
+    return sortEntries(forDate);
+  }, [statusFilteredEntries, dateRange, selectedDate, todayStr, weekStartEnd, sortEntries]);
 
-  // When selected date has no items but we have upcoming entries, show those so schedule is never empty
+  // When selected date/week has no items but we have entries, show sorted list so schedule is never empty
   const itemsToShow = useMemo(() => {
     if (filteredScheduleItems.length > 0) return filteredScheduleItems;
-    if (scheduleEntries.length === 0) return [];
-    const sorted = [...scheduleEntries].sort((a, b) => {
-      const aReq = (a.item.status || '').toLowerCase() === 'requested';
-      const bReq = (b.item.status || '').toLowerCase() === 'requested';
-      if (aReq && !bReq) return -1;
-      if (!aReq && bReq) return 1;
-      const timeA = a.item.scheduled_date || a.item.scheduled_time;
-      const timeB = b.item.scheduled_date || b.item.scheduled_time;
-      if (!timeA) return 1;
-      if (!timeB) return -1;
-      return new Date(timeA).getTime() - new Date(timeB).getTime();
-    });
-    return sorted;
-  }, [filteredScheduleItems, scheduleEntries]);
+    if (statusFilteredEntries.length === 0) return [];
+    return sortEntries(statusFilteredEntries);
+  }, [filteredScheduleItems, statusFilteredEntries, sortEntries]);
 
-  const showingOtherDates = filteredScheduleItems.length === 0 && scheduleEntries.length > 0;
+  const showingOtherDates = filteredScheduleItems.length === 0 && statusFilteredEntries.length > 0;
 
   // Calendar markings (bookings + video calls with a date)
   const markedDates = useMemo(() => {
@@ -212,9 +263,12 @@ export default function ScheduleScreen2({ navigation }: any) {
     navigation.navigate('BookingDetailScreen', { bookingId });
   };
 
+  const normalizeCareRecipient = (raw: any) =>
+    Array.isArray(raw) ? (raw[0] || {}) : (raw || {});
+
   const renderScheduleItem = ({ item: entry }: { item: ScheduleEntry }) => {
     const { type, item } = entry;
-    const careRecipient = item.care_recipient || {};
+    const careRecipient = normalizeCareRecipient(item.care_recipient);
 
     if (type === 'booking') {
       const serviceLabel = SERVICE_LABELS[item.service_type] || item.service_type || 'Booking';
@@ -298,6 +352,18 @@ export default function ScheduleScreen2({ navigation }: any) {
   };
 
   const renderContent = () => {
+    if (error && !loading) {
+      return (
+        <View style={styles.centerContainer}>
+          <Ionicons name="alert-circle-outline" size={48} color={THEME.subText} />
+          <Text style={[styles.emptyText, { marginTop: 12 }]}>{error.message}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => { clearError(); fetchData(); }}>
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
     if (loading && !refreshing) {
       return (
         <View style={styles.centerContainer}>
@@ -337,26 +403,101 @@ export default function ScheduleScreen2({ navigation }: any) {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="arrow-back" size={22} color={THEME.text} />
-        </TouchableOpacity>
-        <Text style={styles.title}>My Schedule</Text>
-        <TouchableOpacity
-          style={styles.calendarBtn}
-          onPress={() => setCalendarVisible(true)}
-        >
-          <Ionicons name="calendar" size={22} color={THEME.primary} />
-        </TouchableOpacity>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <View style={styles.contentWrap}>
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Ionicons name="arrow-back" size={22} color={THEME.text} />
+          </TouchableOpacity>
+          <Text style={styles.title}>My Schedule</Text>
+          <TouchableOpacity
+            style={styles.calendarBtn}
+            onPress={() => setCalendarVisible(true)}
+          >
+            <Ionicons name="calendar" size={22} color={THEME.primary} />
+          </TouchableOpacity>
+        </View>
+
+        {/* Date range filter */}
+      <View style={styles.filterSection}>
+        <Text style={styles.filterLabel}>Date</Text>
+        <View style={styles.filterRow}>
+          {(['date', 'week', 'all'] as const).map((range) => (
+            <TouchableOpacity
+              key={range}
+              style={[styles.filterChip, dateRange === range && styles.filterChipActive]}
+              onPress={() => setDateRange(range)}
+            >
+              <Text style={[styles.filterChipText, dateRange === range && styles.filterChipTextActive]}>
+                {range === 'date' ? selectedDate === todayStr ? 'Today' : 'Selected' : range === 'week' ? 'This week' : 'All'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
 
-      {/* Removed tabs - only showing video calls for caregivers */}
+      {/* Type filter: All | Assignments | Video calls */}
+      <View style={styles.filterSection}>
+        <Text style={styles.filterLabel}>Show</Text>
+        <View style={styles.filterRow}>
+          {(['all', 'assignments', 'video_calls'] as const).map((type) => (
+            <TouchableOpacity
+              key={type}
+              style={[styles.filterChip, typeFilter === type && styles.filterChipActive]}
+              onPress={() => setTypeFilter(type)}
+            >
+              <Ionicons
+                name={type === 'all' ? 'list' : type === 'assignments' ? 'calendar' : 'videocam'}
+                size={16}
+                color={typeFilter === type ? '#fff' : THEME.subText}
+                style={{ marginRight: 4 }}
+              />
+              <Text style={[styles.filterChipText, typeFilter === type && styles.filterChipTextActive]}>
+                {type === 'all' ? 'All' : type === 'assignments' ? 'Assignments' : 'Video calls'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
 
-      {renderContent()}
+      {/* Status filter: All | Pending | Confirmed | In progress | Completed */}
+      <View style={styles.filterSection}>
+        <Text style={styles.filterLabel}>Status</Text>
+        <View style={styles.filterRow}>
+          {(['all', 'pending', 'confirmed', 'in_progress', 'completed'] as const).map((status) => (
+            <TouchableOpacity
+              key={status}
+              style={[styles.filterChip, statusFilter === status && styles.filterChipActive]}
+              onPress={() => setStatusFilter(status)}
+            >
+              <Ionicons
+                name={
+                  status === 'all' ? 'filter' :
+                  status === 'pending' ? 'time' :
+                  status === 'confirmed' ? 'checkmark-circle' :
+                  status === 'in_progress' ? 'play-circle' : 'checkmark-done'
+                }
+                size={16}
+                color={statusFilter === status ? '#fff' : THEME.subText}
+                style={{ marginRight: 4 }}
+              />
+              <Text style={[styles.filterChipText, statusFilter === status && styles.filterChipTextActive]}>
+                {status === 'all' ? 'All' : status === 'pending' ? 'Pending' : status === 'confirmed' ? 'Confirmed' : status === 'in_progress' ? 'In progress' : 'Completed'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
+        <View style={styles.listWrap}>
+          {renderContent()}
+        </View>
+      </View>
+
+      <BottomNav />
 
       <Modal visible={calendarVisible} animationType="slide">
         <SafeAreaView style={{ flex: 1 }}>
@@ -401,6 +542,8 @@ const Legend = ({ color, label }: any) => (
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: THEME.bg },
+  contentWrap: { flex: 1 },
+  listWrap: { flex: 1, minHeight: 0 },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -418,6 +561,43 @@ const styles = StyleSheet.create({
     padding: 8,
     backgroundColor: '#ECFDF5',
     borderRadius: 10,
+  },
+  filterSection: {
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  filterLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: THEME.subText,
+    marginBottom: 6,
+  },
+  filterRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#F3F4F6',
+  },
+  filterChipActive: {
+    backgroundColor: THEME.primary,
+  },
+  filterChipText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: THEME.subText,
+  },
+  filterChipTextActive: {
+    color: '#fff',
   },
   tabsContainer: {
     flexDirection: 'row',
@@ -527,6 +707,18 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center',
     opacity: 0.9,
+  },
+  retryButton: {
+    marginTop: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    backgroundColor: THEME.primary,
+    borderRadius: 10,
+  },
+  retryButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
   },
   otherDatesHeader: {
     marginBottom: 12,

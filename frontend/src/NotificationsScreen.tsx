@@ -1,11 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, StatusBar, Dimensions, ActivityIndicator, Alert } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, StatusBar, Dimensions, ActivityIndicator } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { api } from './api/client';
 import { useAuth } from './context/AuthContext';
+import { useNotification } from './context/NotificationContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useErrorHandler } from './hooks/useErrorHandler';
+import { getSupabase } from './lib/supabase';
+import BottomNav from './BottomNav';
 
 const { width } = Dimensions.get('window');
 
@@ -38,14 +41,27 @@ function formatNotificationDate(createdAt: string | undefined | null): string {
 }
 
 const NotificationsScreen = ({ navigation }: any) => {
+  const { user, loading: authLoading, accessToken } = useAuth();
+  const isCaregiver = user?.role === 'caregiver' || (user as any)?.user_metadata?.role === 'caregiver';
   const [activeTab, setActiveTab] = useState('All');
   const tabs = ['All', 'Requests', 'Updates', 'Messages'];
+  const hasSetCaregiverDefault = useRef(false);
 
-  const { user, loading: authLoading, accessToken } = useAuth();
+  // For caregiver (caretaker): default to "Requests" tab so they see new booking/video call requests first
+  useEffect(() => {
+    if (isCaregiver && !hasSetCaregiverDefault.current) {
+      hasSetCaregiverDefault.current = true;
+      setActiveTab('Requests');
+    }
+  }, [isCaregiver]);
+  const { refresh: refreshNotificationContext } = useNotification();
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  // Removed local error state
   const { handleError, error, clearError } = useErrorHandler();
+  const realtimeChannelRef = useRef<{ unsubscribe: () => void } | null>(null);
+  const lastLoadRef = useRef<number>(0);
+  const hasLoadedOnceRef = useRef(false);
+  const MIN_REFRESH_INTERVAL_MS = 3000;
 
   const loadNotifications = async () => {
     // Don't try to load if auth is still loading or if there's no token
@@ -58,13 +74,15 @@ const NotificationsScreen = ({ navigation }: any) => {
     setLoading(true);
     clearError();
     try {
-      const data = await api.getNotifications({ limit: 50, offset: 0 });
-      console.log('[Notifications] Loaded', Array.isArray(data) ? data.length : 0, 'notifications');
-      setItems(data as any[]);
+      const data = await api.getNotifications({ limit: 50, offset: 0 }) as unknown[] | { data?: unknown[]; notifications?: unknown[] };
+      const list = Array.isArray(data) ? data : (data?.data ?? data?.notifications ?? []);
+      console.log('[Notifications] Loaded', list.length, 'notifications');
+      setItems(list);
     } catch (e: any) {
       handleError(e, 'notifications-load');
     } finally {
       setLoading(false);
+      hasLoadedOnceRef.current = true;
     }
   };
 
@@ -98,16 +116,21 @@ const NotificationsScreen = ({ navigation }: any) => {
 
         case 'booking':
           if (data?.booking_id) {
-            // Navigate to booking details if screen exists
-            console.log('Navigate to booking:', data.booking_id);
+            navigation.navigate('BookingDetailScreen', { bookingId: data.booking_id });
           }
           break;
 
         case 'emergency':
           if (data?.emergency_id) {
             navigation.navigate('EmergencyScreen', {
-              emergencyId: data.emergency_id,
-              location: data.location
+              emergency_id: data.emergency_id,
+              notification: {
+                data: {
+                  emergency_id: data.emergency_id,
+                  location: data.location,
+                  care_recipient_name: data.care_recipient_name,
+                },
+              },
             });
           } else {
             navigation.navigate('EmergencyScreen');
@@ -127,27 +150,66 @@ const NotificationsScreen = ({ navigation }: any) => {
   };
 
   useEffect(() => {
-    // Wait for auth to finish loading before fetching notifications
     if (!authLoading && accessToken) {
       loadNotifications();
     }
   }, [authLoading, accessToken]);
 
-  // Refresh notifications when screen is focused
+  // Real-time: subscribe to new notifications for this user so list updates immediately
+  useEffect(() => {
+    if (!user?.id || authLoading || !accessToken) return;
+    const supabase = getSupabase();
+    const userId = String(user.id);
+    if (!supabase) return;
+    try {
+      const channel = supabase
+        .channel(`notifications-list:${userId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'notifications',
+            filter: `user_id=eq.${userId}`,
+          },
+          () => {
+            loadNotifications();
+          }
+        )
+        .subscribe();
+      realtimeChannelRef.current = channel;
+      return () => {
+        if (realtimeChannelRef.current?.unsubscribe) realtimeChannelRef.current.unsubscribe();
+        realtimeChannelRef.current = null;
+      };
+    } catch (e) {
+      console.warn('[NotificationsScreen] Realtime subscribe failed:', e);
+    }
+  }, [user?.id, authLoading, accessToken]);
+
+  // Refresh when screen is focused, but not more than once per MIN_REFRESH_INTERVAL_MS to avoid constant refresh
   useFocusEffect(
     React.useCallback(() => {
       if (!authLoading && accessToken) {
-        loadNotifications();
+        const now = Date.now();
+        const shouldLoad = !hasLoadedOnceRef.current || (now - lastLoadRef.current >= MIN_REFRESH_INTERVAL_MS);
+        if (shouldLoad) {
+          lastLoadRef.current = now;
+          loadNotifications();
+          refreshNotificationContext(true);
+        }
         return () => clearError();
       }
-    }, [authLoading, accessToken])
+    }, [authLoading, accessToken, refreshNotificationContext])
   );
 
   const renderNotificationItem = (item: any) => {
-    // ... (existing renderNotificationItem logic)
     const type = item.type || 'update';
-    const title = item.title || 'Notification';
-    const content = item.message || item.body || item.content || '';
+    const bookingStatus = item.data?.booking_status ?? item.data?.status ?? '';
+    const isAccepted = type === 'booking' && ['accepted', 'confirmed', 'in_progress', 'completed'].includes(String(bookingStatus).toLowerCase());
+    const isDeclined = type === 'booking' && String(bookingStatus).toLowerCase() === 'cancelled';
+    const title = isAccepted ? 'Accepted' : isDeclined ? 'Declined' : (item.title || 'Notification');
+    const content = isAccepted ? 'You accepted this booking request.' : isDeclined ? 'You declined this booking request.' : (item.message || item.body || item.content || '');
     const createdAt = item.created_at || item.time;
     const isUnread = item.is_read === false || item.unread;
 
@@ -231,128 +293,25 @@ const NotificationsScreen = ({ navigation }: any) => {
           </View>
         </View>
 
-        {/* --- ACTIONS --- */}
-        {/* Booking Request Actions: hide when booking already completed/cancelled (if status is in payload) */}
-        {type === 'booking' &&
-          user?.role === 'caregiver' &&
-          item.title?.includes('New Booking') &&
-          !!item.data?.booking_id &&
-          !['completed', 'cancelled'].includes(item.data?.booking_status ?? '') ? (
-          <View style={styles.actionRow}>
-            <TouchableOpacity
-              style={styles.acceptBtn}
-              onPress={async () => {
-                try {
-                  if (item.data?.booking_id) {
-                    await api.respondToBooking(item.data.booking_id, 'accepted');
-                    await loadNotifications();
-                  }
-                } catch (e: any) {
-                  if (e?.statusCode === 409) {
-                    Alert.alert(
-                      'Cannot Update',
-                      'This booking has already been completed or cancelled.',
-                      [{ text: 'OK', onPress: () => loadNotifications() }]
-                    );
-                    return;
-                  }
-                  handleError(e, 'accept-booking');
-                }
-              }}
-            >
-              <Text style={styles.acceptBtnText}>Accept Request</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.closeBtn}
-              onPress={async () => {
-                try {
-                  if (item.data?.booking_id) {
-                    await api.respondToBooking(item.data.booking_id, 'rejected');
-                    await loadNotifications();
-                  }
-                } catch (e: any) {
-                  if (e?.statusCode === 409) {
-                    Alert.alert(
-                      'Cannot Update',
-                      'This booking has already been completed or cancelled.',
-                      [{ text: 'OK', onPress: () => loadNotifications() }]
-                    );
-                    return;
-                  }
-                  handleError(e, 'decline-booking');
-                }
-              }}
-            >
-              <Text style={{ color: '#666', fontWeight: '600' }}>Decline</Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
-
-        {/* Legacy Request Actions (if any) */}
-        {type === 'request' && (
-          <View style={styles.actionRow}>
-            <TouchableOpacity
-              style={styles.acceptBtn}
-              onPress={() => Alert.alert('Booking Requests', 'To accept or decline booking requests, please open the booking from the Bookings tab.')}
-            >
-              <Text style={styles.acceptBtnText}>Accept Request</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.closeBtn}
-              onPress={() => Alert.alert('Booking Requests', 'To decline booking requests, please open the booking from the Bookings tab.')}
-            >
-              <Ionicons name="close" size={20} color="#666" />
-            </TouchableOpacity>
-          </View>
-        )}
-        {type === 'video_call' &&
-          user?.role === 'caregiver' &&
-          !!item.data?.video_call_id &&
-          (item.data?.status === 'pending' || item.status === 'pending' || (!item.data?.status && !item.status)) &&
-          !item.data?.caregiver_accepted ? (
-            <View style={styles.actionRow}>
-              <TouchableOpacity
-                style={styles.acceptBtn}
-                onPress={async () => {
-                  try {
-                    await api.acceptVideoCallRequest(item.data.video_call_id, true);
-                    await loadNotifications();
-                  } catch (e) {
-                    handleError(e, 'accept-call');
-                  }
-                }}
-              >
-                <Text style={styles.acceptBtnText}>Accept Call</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.closeBtn}
-                onPress={async () => {
-                  try {
-                    await api.acceptVideoCallRequest(item.data.video_call_id, false);
-                    await loadNotifications();
-                  } catch (e) {
-                    handleError(e, 'decline-call');
-                  }
-                }}
-              >
-                <Ionicons name="close" size={20} color="#666" />
-              </TouchableOpacity>
-            </View>
-          ) : null}
       </TouchableOpacity>
     );
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
-
+      <View style={styles.contentWrap}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color={COLORS.darkText} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Notifications</Text>
+        <View style={styles.headerTitleWrap}>
+          <Text style={styles.headerTitle}>Notifications</Text>
+          {isCaregiver && (
+            <Text style={styles.headerSubtitle}>Requests & updates</Text>
+          )}
+        </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <TouchableOpacity onPress={loadNotifications}>
             <Ionicons name="refresh" size={20} color={COLORS.primaryGreen} />
@@ -410,29 +369,51 @@ const NotificationsScreen = ({ navigation }: any) => {
 
       {/* Filter items by tab */}
       {(() => {
+        const TERMINAL_BOOKING_STATUSES = ['accepted', 'confirmed', 'in_progress', 'completed', 'cancelled'];
+        const isBookingPending = (item: any) => {
+          const status = item.data?.status ?? item.data?.booking_status ?? '';
+          return !TERMINAL_BOOKING_STATUSES.includes(String(status).toLowerCase());
+        };
         const filtered = items.filter((item) => {
           const type = item.type || 'update';
           if (activeTab === 'Requests') {
-            // Include video_call and booking requests in Requests tab
-            return type === 'request' || type === 'video_call' || type === 'booking';
+            if (type === 'emergency') return true;
+            if (type === 'request' || type === 'video_call') return true;
+            // Only show booking notifications that are actual pending requests (New Booking Request, not yet accepted/completed)
+            if (type === 'booking') {
+              const isNewRequest = (item.title || '').toLowerCase().includes('new booking request');
+              return isNewRequest && isBookingPending(item);
+            }
+            return false;
           }
           if (activeTab === 'Messages') {
             return type === 'message' || type === 'chat_session';
           }
           if (activeTab === 'Updates') {
-            // Treat everything that is not request/video_call/booking/message as an update
-            return type !== 'request' && type !== 'video_call' && type !== 'booking' && type !== 'message' && type !== 'chat_session';
+            if (type === 'message' || type === 'chat_session' || type === 'request') return false;
+            if (type === 'video_call') return false;
+            // Show booking status updates (accepted, declined, cancelled) and other update types
+            if (type === 'booking') {
+              const status = String(item.data?.booking_status ?? item.data?.status ?? '').toLowerCase();
+              return ['accepted', 'cancelled', 'completed'].includes(status) ||
+                (item.title || '').toLowerCase().includes('accepted') ||
+                (item.title || '').toLowerCase().includes('declined') ||
+                (item.title || '').toLowerCase().includes('status update');
+            }
+            return true; // other types (e.g. generic update)
           }
           return true; // All
         });
 
         return (
-          <ScrollView contentContainerStyle={styles.listContent}>
+          <ScrollView style={styles.scrollView} contentContainerStyle={styles.listContent}>
             <Text style={styles.sectionHeader}>{activeTab.toUpperCase()}</Text>
             {filtered.map(renderNotificationItem)}
           </ScrollView>
         );
       })()}
+      </View>
+      <BottomNav />
     </SafeAreaView>
   );
 };
@@ -442,6 +423,8 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FAFAFA',
   },
+  contentWrap: { flex: 1 },
+  scrollView: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -458,10 +441,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingRight: 10,
   },
+  headerTitleWrap: {
+    flex: 1,
+  },
   headerTitle: {
     fontSize: 20,
     fontWeight: 'bold',
     color: COLORS.darkText,
+  },
+  headerSubtitle: {
+    fontSize: 12,
+    color: COLORS.grayText,
+    marginTop: 2,
   },
   markReadText: {
     color: COLORS.primaryGreen,
@@ -608,34 +599,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#999',
     marginTop: 6,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    marginTop: 12,
-    alignItems: 'center',
-  },
-  acceptBtn: {
-    flex: 1,
-    backgroundColor: COLORS.primaryGreen,
-    paddingVertical: 10,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginRight: 10,
-  },
-  acceptBtnText: {
-    color: '#FFF',
-    fontWeight: '700',
-    fontSize: 13,
-  },
-  closeBtn: {
-    minWidth: 48,
-    minHeight: 48,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
   },
   // Error Styles
   errorContainer: {

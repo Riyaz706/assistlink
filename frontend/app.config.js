@@ -1,5 +1,5 @@
 // Load .env - Expo loads EXPO_PUBLIC_* automatically, but we expose in extra for reliability
-const apiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || 'https://assistlink-backend.onrender.com';
+const apiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || 'https://assistlink-backend-1qjd.onrender.com';
 
 export default {
   expo: {
@@ -31,6 +31,19 @@ export default {
         backgroundColor: '#ffffff',
       },
       package: 'com.assistlink.app',
+      // Required for push notifications (FCM). Download from Firebase Console and place at frontend/google-services.json
+      // See docs/PUSH_NOTIFICATIONS_FCM.md or https://docs.expo.dev/push-notifications/fcm-credentials/
+      ...(process.env.EXPO_PUBLIC_GOOGLE_SERVICES_FILE !== 'false' && (() => {
+        try {
+          const path = require('path');
+          const fs = require('fs');
+          const p = path.join(process.cwd(), 'google-services.json');
+          fs.accessSync(p);
+          return { googleServicesFile: './google-services.json' };
+        } catch {
+          return {};
+        }
+      })()),
       permissions: [
         'CAMERA',
         'RECORD_AUDIO',

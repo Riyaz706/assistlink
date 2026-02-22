@@ -135,7 +135,8 @@ const BookingsScreen = () => {
     };
 
     return (
-        <SafeAreaView style={styles.container} edges={['top']}>
+        <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+            <View style={styles.contentWrap}>
             <StatusBar barStyle="dark-content" />
             <View style={styles.header}>
                 <TouchableOpacity
@@ -161,6 +162,7 @@ const BookingsScreen = () => {
                 <LoadingState message="Loading bookings..." />
             ) : (
                 <FlatList
+                    style={styles.listFill}
                     data={bookings}
                     keyExtractor={(item) => item.id}
                     renderItem={({ item }) => (
@@ -184,12 +186,15 @@ const BookingsScreen = () => {
                     }
                 />
             )}
+            </View>
             <BottomNav />
         </SafeAreaView>
     );
 };
 
 const styles = StyleSheet.create({
+  contentWrap: { flex: 1 },
+  listFill: { flex: 1 },
     container: {
         flex: 1,
         backgroundColor: '#F8F9FA',

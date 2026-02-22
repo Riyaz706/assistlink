@@ -19,7 +19,8 @@ async def get_notifications(
 ):
     """Get notifications for current user"""
     try:
-        user_id = current_user.get("id") if isinstance(current_user, dict) else str(current_user.get("id", ""))
+        raw_id = current_user.get("id") if isinstance(current_user, dict) else (getattr(current_user, "id", None) if current_user else None)
+        user_id = str(raw_id) if raw_id is not None else ""
         
         if not user_id:
             raise HTTPException(

@@ -86,30 +86,50 @@ async def trigger_emergency(
             pass
 
         caregivers_notified = 0
+        caregiver_ids = []
         # Notify caregivers from active bookings for this care recipient
-        # Statuses: requested, accepted, confirmed, in_progress (app uses these; "pending" is legacy)
+        # Statuses: requested, pending (legacy), accepted, confirmed, in_progress
         try:
             bookings = supabase_admin.table("bookings") \
                 .select("caregiver_id") \
                 .eq("care_recipient_id", str(user_id)) \
-                .in_("status", ["requested", "accepted", "confirmed", "in_progress"]) \
+                .in_("status", ["requested", "pending", "accepted", "confirmed", "in_progress"]) \
                 .execute()
             caregiver_ids = list({str(b["caregiver_id"]) for b in (bookings.data or []) if b.get("caregiver_id")})
-            for cid in caregiver_ids:
-                try:
-                    await notify_emergency_alert(
-                        caregiver_id=str(cid),
-                        care_recipient_name=care_recipient_name,
-                        emergency_id=emergency_id,
-                        location=location
-                    )
-                    caregivers_notified += 1
-                except Exception as nerr:
-                    sys.stderr.write(f"[EMERGENCY] notify caregiver {cid} failed: {nerr}\n")
-                    sys.stderr.flush()
+            sys.stderr.write(f"[EMERGENCY] Found {len(caregiver_ids)} caregiver(s) from bookings for user {user_id}\n")
+            sys.stderr.flush()
         except Exception as e:
             sys.stderr.write(f"[EMERGENCY] fetch caregivers failed: {e}\n")
             sys.stderr.flush()
+
+        # Fallback: if no caregivers from bookings, notify first few caregivers so alert is never silent
+        if not caregiver_ids:
+            try:
+                fallback = supabase_admin.table("users") \
+                    .select("id") \
+                    .eq("role", "caregiver") \
+                    .eq("is_active", True) \
+                    .limit(20) \
+                    .execute()
+                caregiver_ids = list({str(r["id"]) for r in (fallback.data or []) if r.get("id")})
+                sys.stderr.write(f"[EMERGENCY] No bookings; notifying {len(caregiver_ids)} caregiver(s) as fallback\n")
+                sys.stderr.flush()
+            except Exception as e2:
+                sys.stderr.write(f"[EMERGENCY] fallback caregiver fetch failed: {e2}\n")
+                sys.stderr.flush()
+
+        for cid in caregiver_ids:
+            try:
+                await notify_emergency_alert(
+                    caregiver_id=str(cid),
+                    care_recipient_name=care_recipient_name,
+                    emergency_id=emergency_id,
+                    location=location
+                )
+                caregivers_notified += 1
+            except Exception as nerr:
+                sys.stderr.write(f"[EMERGENCY] notify caregiver {cid} failed: {nerr}\n")
+                sys.stderr.flush()
 
         return {
             "status": "success",

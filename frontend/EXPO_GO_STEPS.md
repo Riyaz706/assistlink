@@ -3,7 +3,7 @@
 ## Prerequisites
 - **Expo Go app** installed on your Android/iOS device
 - **Same WiFi network** for both your computer and mobile device
-- **Backend running** at `https://assistlink-nd65.onrender.com`
+- **Backend running** at `https://assistlink-backend-1qjd.onrender.com`
 
 ## Step-by-Step Instructions
 
@@ -63,7 +63,7 @@ Once loaded, you should see:
 
 ### "Network request failed"
 - **Cause:** Backend URL not configured
-- **Fix:** Already fixed! The app now uses `https://assistlink-nd65.onrender.com` as fallback
+- **Fix:** Already fixed! The app now uses `https://assistlink-backend-1qjd.onrender.com` as fallback
 
 ### Login shows "API Error [404]"
 - **Check the error message** - it now shows the exact URL being called
@@ -92,7 +92,7 @@ npx expo start --tunnel
 ```
 
 ## Current Status
-✅ Backend is live at `https://assistlink-nd65.onrender.com`  
+✅ Backend is live at `https://assistlink-backend-1qjd.onrender.com`  
 ✅ API client configured with fallback URL  
 ✅ Enhanced error reporting enabled  
 ⏳ Ready to test in Expo Go!

@@ -30,15 +30,29 @@ def _get_role_col(role: str):
             "care_recipient" if role == "caregiver" else "caregiver")
 
 
+def _normalize_embed(rows: list, alias: str) -> None:
+    """Ensure embedded FK relation is a single dict (Supabase can return list)."""
+    for row in rows:
+        val = row.get(alias)
+        if isinstance(val, list) and len(val) > 0:
+            row[alias] = val[0]
+        elif isinstance(val, list):
+            row[alias] = None
+
+
 async def _resolve_role(user_id: str, current_user: dict) -> Optional[str]:
-    """Get role from DB first (source of truth), then fall back to auth metadata."""
+    """Get role from DB first (source of truth), then fall back to auth metadata or current_user.role."""
     try:
-        res = supabase_admin.table("users").select("role").eq("id", user_id).limit(1).execute()
+        uid = str(user_id)
+        res = supabase_admin.table("users").select("role").eq("id", uid).limit(1).execute()
         if res.data and len(res.data) > 0 and res.data[0].get("role"):
             return res.data[0].get("role")
     except Exception:
         pass
     role = (current_user.get("user_metadata") or {}).get("role")
+    if role in ("care_recipient", "caregiver"):
+        return role
+    role = current_user.get("role")
     return role if role in ("care_recipient", "caregiver") else None
 
 
@@ -46,7 +60,11 @@ async def _resolve_role(user_id: str, current_user: dict) -> Optional[str]:
 async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
     """Get dashboard statistics for current user — Supabase client only."""
     try:
-        user_id = current_user["id"]
+        user_id = str(current_user.get("id") or "")
+        if not user_id:
+            return DashboardStats(upcoming_bookings=0, active_bookings=0,
+                                  completed_bookings=0, pending_video_calls=0,
+                                  active_chat_sessions=0)
         role = await _resolve_role(user_id, current_user)
 
         if not role:
@@ -127,9 +145,13 @@ async def get_dashboard_bookings(
 ):
     """Get bookings for dashboard — Supabase client only."""
     try:
-        user_id = current_user["id"]
+        user_id = str(current_user.get("id") or "")
+        if not user_id:
+            return []
         role = await _resolve_role(user_id, current_user)
         if not role:
+            sys.stderr.write(f"[DASHBOARD] bookings: no role resolved for user_id={user_id[:8]}...\n")
+            sys.stderr.flush()
             return []
 
         role_col, other_role_col, other_role_alias = _get_role_col(role)
@@ -168,9 +190,13 @@ async def get_dashboard_bookings(
                         filtered.append(b)
             # Sort: dated first (asc), then nulls; then apply limit
             filtered.sort(key=lambda x: (x.get("scheduled_date") is None, x.get("scheduled_date") or ""))
-            return filtered[:limit]
+            out = filtered[:limit]
+            _normalize_embed(out, other_role_alias)
+            return out
         res = query.order("scheduled_date", desc=False).range(offset, offset + limit - 1).execute()
-        return res.data or []
+        data = res.data or []
+        _normalize_embed(data, other_role_alias)
+        return data
 
     except Exception as e:
         sys.stderr.write(f"[DASHBOARD] bookings error: {e}\n"); sys.stderr.flush()
@@ -184,7 +210,9 @@ async def get_upcoming_bookings(
 ):
     """Get upcoming bookings (next 7 days)."""
     try:
-        user_id = current_user["id"]
+        user_id = str(current_user.get("id") or "")
+        if not user_id:
+            return []
         role = await _resolve_role(user_id, current_user)
         if not role:
             return []
@@ -212,7 +240,9 @@ async def get_upcoming_bookings(
 async def get_recurring_bookings(current_user: dict = Depends(get_current_user)):
     """Get all recurring bookings — Supabase client only."""
     try:
-        user_id = current_user["id"]
+        user_id = str(current_user.get("id") or "")
+        if not user_id:
+            return []
         role = await _resolve_role(user_id, current_user)
         if not role:
             return []
@@ -240,7 +270,9 @@ async def get_dashboard_video_calls(
 ):
     """Get video call requests for dashboard — Supabase client only."""
     try:
-        user_id = current_user["id"]
+        user_id = str(current_user.get("id") or "")
+        if not user_id:
+            return []
         role = await _resolve_role(user_id, current_user)
         if not role:
             return []
@@ -255,7 +287,9 @@ async def get_dashboard_video_calls(
             query = query.eq("status", status_filter)
 
         res = query.order("scheduled_time", desc=False).range(offset, offset + limit - 1).execute()
-        return res.data or []
+        data = res.data or []
+        _normalize_embed(data, other_role_alias)
+        return data
 
     except Exception as e:
         sys.stderr.write(f"[DASHBOARD] video-calls error: {e}\n"); sys.stderr.flush()

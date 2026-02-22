@@ -17,8 +17,21 @@ import { api } from './api/client';
 import { useAuth } from './context/AuthContext';
 import BottomNav from './BottomNav';
 
+const TIMELINE_BLUE = '#007AFF';
+const TIMELINE_GREEN = '#22C55E';
+const TIMELINE_RED = '#DC2626';
 const StatusTimeline = ({ history }: { history: any[] }) => {
     if (!history || history.length === 0) return null;
+
+    const TIMELINE_GREY = '#9CA3AF';
+    const getDotColor = (entry: any) => {
+        const status = (entry.new_status || '').toLowerCase();
+        if (status === 'requested' || status === 'completed') return TIMELINE_BLUE;
+        if (status === 'accepted' || status === 'confirmed' || status === 'in_progress') return TIMELINE_GREEN;
+        if (status === 'cancelled' || status === 'rejected') return TIMELINE_RED;
+        if (status === 'pending') return TIMELINE_GREY;
+        return TIMELINE_GREY;
+    };
 
     return (
         <View style={styles.section}>
@@ -26,10 +39,10 @@ const StatusTimeline = ({ history }: { history: any[] }) => {
             <View style={styles.timeline}>
                 {history.map((entry, index) => (
                     <View key={entry.id} style={styles.timelineItem}>
-                        <View style={[styles.timelineDot, { backgroundColor: index === 0 ? '#007AFF' : '#CCC' }]} />
+                        <View style={[styles.timelineDot, { backgroundColor: getDotColor(entry) }]} />
                         {index !== history.length - 1 && <View style={styles.timelineLine} />}
                         <View style={styles.timelineContent}>
-                            <Text style={styles.timelineStatus}>
+                            <Text style={[styles.timelineStatus, { color: getDotColor(entry) }]}>
                                 {entry.new_status.toUpperCase().replace('_', ' ')}
                             </Text>
                             <Text style={styles.timelineDate}>
@@ -71,7 +84,13 @@ const BookingDetailScreen = () => {
                 reviewPromise.catch(() => null) // Ignore review fetch errors
             ]);
 
-            setBooking(bookingRes);
+            setBooking((prev) => {
+                const incoming = bookingRes?.status;
+                if (prev && (prev.status === 'accepted' || prev.status === 'cancelled') && incoming === 'requested') {
+                    return prev;
+                }
+                return bookingRes;
+            });
             setHistory(historyRes as any[]);
             setReview(reviewRes);
         } catch (error) {
@@ -112,8 +131,10 @@ const BookingDetailScreen = () => {
             setActionLoading(true);
             if (newStatus === 'accepted' || newStatus === 'rejected') {
                 await api.respondToBooking(bookingId, newStatus as any, reason);
+                setBooking((prev) => prev ? { ...prev, status: newStatus === 'rejected' ? 'cancelled' : 'accepted' } : null);
             } else if (newStatus === 'cancelled') {
                 await api.cancelBooking(bookingId, reason);
+                setBooking((prev) => prev ? { ...prev, status: 'cancelled' } : null);
             } else {
                 await api.updateBookingStatus(bookingId, newStatus, reason);
             }
@@ -141,19 +162,31 @@ const BookingDetailScreen = () => {
     const [rating, setRating] = useState(5);
     const [reviewText, setReviewText] = useState('');
 
+    const reviewSubmittedRef = React.useRef(false);
     const handleReviewSubmit = async () => {
+        if (reviewSubmittedRef.current || review) return;
         try {
             setActionLoading(true);
-            await api.submitReview({
+            const submitted = await api.submitReview({
                 booking_id: bookingId,
                 rating,
                 comment: reviewText.trim() || undefined
             });
+            reviewSubmittedRef.current = true;
             setReviewModalVisible(false);
-            Alert.alert("Success", "Thank you for your feedback!");
+            if (submitted && typeof submitted === 'object' && 'rating' in submitted) {
+                setReview({ rating: (submitted as any).rating, comment: (submitted as any).comment });
+            }
+            Alert.alert("Success", "Thank you for your feedback! You can only rate once per booking.");
             fetchDetails();
         } catch (error: any) {
-            Alert.alert("Error", error.message || "Failed to submit review");
+            if (error?.statusCode === 409 || (error?.message && error.message.toLowerCase().includes('already'))) {
+                setReviewModalVisible(false);
+                Alert.alert("Already reviewed", "You have already submitted a review for this booking. You can only rate once.");
+                fetchDetails();
+            } else {
+                Alert.alert("Error", error?.message || "Failed to submit review");
+            }
         } finally {
             setActionLoading(false);
         }
@@ -197,7 +230,10 @@ const BookingDetailScreen = () => {
                         {['requested', 'accepted', 'confirmed'].includes(status) && (
                             <TouchableOpacity
                                 style={[styles.button, styles.cancelButton]}
-                                onPress={() => Alert.prompt("Cancel Booking", "Reason", (reason) => handleStatusUpdate("cancelled", reason))}
+                                onPress={() => Alert.alert("Cancel Booking", "Are you sure you want to cancel this booking?", [
+                                    { text: "No", style: "cancel" },
+                                    { text: "Yes, Cancel", onPress: () => handleStatusUpdate("cancelled") },
+                                ])}
                             >
                                 <Text style={styles.buttonText}>Cancel Booking</Text>
                             </TouchableOpacity>
@@ -228,7 +264,10 @@ const BookingDetailScreen = () => {
                                 </TouchableOpacity>
                                 <TouchableOpacity
                                     style={[styles.button, styles.cancelButton]}
-                                    onPress={() => Alert.prompt("Reject Request", "Reason", (reason) => handleStatusUpdate("cancelled", reason))}
+                                    onPress={() => Alert.alert("Reject Request", "Are you sure you want to reject this request?", [
+                                        { text: "No", style: "cancel" },
+                                        { text: "Yes, Reject", onPress: () => handleStatusUpdate("cancelled") },
+                                    ])}
                                 >
                                     <Text style={styles.buttonText}>Reject Request</Text>
                                 </TouchableOpacity>
@@ -253,11 +292,14 @@ const BookingDetailScreen = () => {
                             </TouchableOpacity>
                         )}
 
-                        {/* Caregiver can cancel if accepted or confirmed (but maybe with penalty logic later) */}
+                        {/* Caregiver can cancel if accepted or confirmed */}
                         {['accepted', 'confirmed'].includes(status) && (
                             <TouchableOpacity
                                 style={[styles.button, styles.cancelButton]}
-                                onPress={() => Alert.prompt("Cancel Booking", "Reason", (reason) => handleStatusUpdate("cancelled", reason))}
+                                onPress={() => Alert.alert("Cancel Booking", "Are you sure you want to cancel this booking?", [
+                                    { text: "No", style: "cancel" },
+                                    { text: "Yes, Cancel", onPress: () => handleStatusUpdate("cancelled") },
+                                ])}
                             >
                                 <Text style={styles.buttonText}>Cancel Booking</Text>
                             </TouchableOpacity>
@@ -285,18 +327,19 @@ const BookingDetailScreen = () => {
     }
 
     return (
-        <SafeAreaView style={styles.container}>
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-                    <Ionicons name="arrow-back" size={24} color="#000" />
-                </TouchableOpacity>
-                <Text style={styles.headerTitle}>Booking Details</Text>
-                <TouchableOpacity onPress={() => fetchDetails(true)}>
-                    <Ionicons name="refresh" size={24} color="#007AFF" />
-                </TouchableOpacity>
-            </View>
+        <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+            <View style={styles.contentWrap}>
+                <View style={styles.header}>
+                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+                        <Ionicons name="arrow-back" size={24} color="#000" />
+                    </TouchableOpacity>
+                    <Text style={styles.headerTitle}>Booking Details</Text>
+                    <TouchableOpacity onPress={() => fetchDetails(true)}>
+                        <Ionicons name="refresh" size={24} color="#007AFF" />
+                    </TouchableOpacity>
+                </View>
 
-            <ScrollView contentContainerStyle={styles.scrollContent}>
+                <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
 
                 <View style={styles.statusBanner}>
                     <Text style={styles.statusLabel}>Status</Text>
@@ -334,8 +377,14 @@ const BookingDetailScreen = () => {
                 </View>
 
                 {review && (
-                    <View style={styles.section}>
-                        <Text style={styles.sectionTitle}>Your Rating</Text>
+                    <View style={[styles.section, styles.reviewLockedSection]}>
+                        <View style={styles.reviewLockedHeader}>
+                            <Text style={styles.sectionTitle}>Your Rating</Text>
+                            <View style={styles.lockedBadge}>
+                                <Ionicons name="lock-closed" size={14} color="#64748B" />
+                                <Text style={styles.lockedBadgeText}>Locked</Text>
+                            </View>
+                        </View>
                         <View style={{ flexDirection: 'row', marginBottom: 8 }}>
                             {[1, 2, 3, 4, 5].map(s => (
                                 <Ionicons
@@ -347,6 +396,7 @@ const BookingDetailScreen = () => {
                             ))}
                         </View>
                         {review.comment && <Text style={styles.reviewComment}>{review.comment}</Text>}
+                        <Text style={styles.reviewLockedHint}>You can only rate once per booking.</Text>
                     </View>
                 )}
 
@@ -356,16 +406,20 @@ const BookingDetailScreen = () => {
 
                 <StatusTimeline history={history} />
 
-            </ScrollView>
+                </ScrollView>
+            </View>
 
             <Modal
                 transparent={true}
-                visible={reviewModalVisible}
+                visible={reviewModalVisible && !review}
                 onRequestClose={() => setReviewModalVisible(false)}
             >
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContent}>
-                        <Text style={styles.modalTitle}>Rate Your Caregiver</Text>
+                        <Text style={styles.modalTitle}>Rate your caregiver</Text>
+                        <Text style={{ fontSize: 14, color: '#666', marginBottom: 16, textAlign: 'center' }}>
+                          Your rating helps other families find the right care.
+                        </Text>
                         <View style={{ flexDirection: 'row', justifyContent: 'center', marginBottom: 20 }}>
                             {[1, 2, 3, 4, 5].map(s => (
                                 <TouchableOpacity key={s} onPress={() => setRating(s)}>
@@ -467,6 +521,12 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: '#F8F9FA',
+    },
+    contentWrap: {
+        flex: 1,
+    },
+    scrollView: {
+        flex: 1,
     },
     center: {
         flex: 1,
@@ -664,6 +724,38 @@ const styles = StyleSheet.create({
     modalButtonTextConfirm: {
         color: '#FFF',
         fontWeight: '600',
+    },
+    reviewLockedSection: {
+        backgroundColor: '#F8FAFC',
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+        borderRadius: 8,
+    },
+    reviewLockedHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 4,
+    },
+    lockedBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        backgroundColor: '#F1F5F9',
+        borderRadius: 6,
+    },
+    lockedBadgeText: {
+        fontSize: 12,
+        color: '#64748B',
+        fontWeight: '600',
+    },
+    reviewLockedHint: {
+        fontSize: 12,
+        color: '#94A3B8',
+        marginTop: 8,
+        fontStyle: 'italic',
     },
     reviewComment: {
         fontSize: 14,

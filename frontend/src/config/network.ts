@@ -7,7 +7,7 @@
 export type AppEnv = 'development' | 'staging' | 'production';
 
 const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '10.0.2.2'];
-const PRODUCTION_DEFAULT = 'https://assistlink-backend.onrender.com';
+const PRODUCTION_DEFAULT = 'https://assistlink-backend-1qjd.onrender.com';
 
 function getAppEnv(): AppEnv {
   const env = (process.env.EXPO_PUBLIC_APP_ENV || process.env.NODE_ENV || 'development').toLowerCase();

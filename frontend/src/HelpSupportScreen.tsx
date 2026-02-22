@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
-import { colors, typography, spacing } from './theme';
+import { colors, typography, spacing, accessibility as a11y } from './theme';
 import Constants from 'expo-constants';
 import BottomNav from './BottomNav';
 import { api } from './api/client';
@@ -65,26 +65,43 @@ const HelpSupportScreen = ({ navigation }: any) => {
     }
   };
 
-  const Item = ({ icon, label, onPress }: { icon: string; label: string; onPress: () => void }) => (
-    <TouchableOpacity style={styles.linkItem} onPress={onPress} activeOpacity={0.7}>
-      <Icon name={icon as any} size={22} color={colors.primary} style={styles.linkIcon} />
+  const Item = ({ icon, label, onPress, hint }: { icon: string; label: string; onPress: () => void; hint?: string }) => (
+    <TouchableOpacity
+      style={styles.linkItem}
+      onPress={onPress}
+      activeOpacity={0.7}
+      accessibilityLabel={label}
+      accessibilityRole="button"
+      accessibilityHint={hint}
+    >
+      <Icon name={icon as any} size={22} color={colors.primary} style={styles.linkIcon} accessibilityElementsHidden />
       <Text style={styles.linkLabel}>{label}</Text>
-      <Icon name="chevron-right" size={24} color={colors.textSecondary} />
+      <Icon name="chevron-right" size={24} color={colors.textSecondary} accessibilityElementsHidden />
     </TouchableOpacity>
   );
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.backBtn}
+          accessibilityLabel="Go back"
+          accessibilityRole="button"
+          accessibilityHint="Returns to the previous screen"
+        >
           <Icon name="arrow-left" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Help & Support</Text>
+        <Text style={styles.headerTitle} accessibilityRole="header">Help & Support</Text>
         <View style={styles.backBtn} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={styles.sectionTitle}>FAQ</Text>
         <View style={styles.card}>
           {FAQ_ITEMS.map((faq, i) => (
@@ -101,11 +118,13 @@ const HelpSupportScreen = ({ navigation }: any) => {
             icon="play-circle"
             label="Video tutorials"
             onPress={() => Alert.alert('Coming soon', 'Video tutorials will be available in a future update.')}
+            hint="Opens video tutorials. Coming soon."
           />
           <Item
             icon="book-open-variant"
             label="User manual"
             onPress={() => Alert.alert('Coming soon', 'The user manual will be available in a future update.')}
+            hint="Opens user manual. Coming soon."
           />
           <Item
             icon="file-document-outline"
@@ -114,6 +133,7 @@ const HelpSupportScreen = ({ navigation }: any) => {
               const termsUrl = 'https://assistlink.app/terms';
               Linking.openURL(termsUrl).catch(() => Alert.alert('Error', 'Could not open Terms of Service.'));
             }}
+            hint="Opens Terms of Service in browser"
           />
         </View>
 
@@ -127,6 +147,8 @@ const HelpSupportScreen = ({ navigation }: any) => {
             onChangeText={setContactEmail}
             keyboardType="email-address"
             autoCapitalize="none"
+            accessibilityLabel="Your email"
+            accessibilityHint="Email address for support to reply"
           />
           <TextInput
             style={[styles.input, styles.inputMultiline]}
@@ -136,11 +158,17 @@ const HelpSupportScreen = ({ navigation }: any) => {
             onChangeText={setContactMessage}
             multiline
             numberOfLines={4}
+            accessibilityLabel="Your message"
+            accessibilityHint="Describe your issue or question"
           />
           <TouchableOpacity
             style={[styles.primaryBtn, submitting && { opacity: 0.7 }]}
             onPress={sendContact}
             disabled={submitting}
+            accessibilityLabel="Send message"
+            accessibilityRole="button"
+            accessibilityHint="Sends your message to support"
+            accessibilityState={{ disabled: submitting, busy: submitting }}
           >
             {submitting ? (
               <ActivityIndicator color={colors.card} size="small" />
@@ -160,11 +188,17 @@ const HelpSupportScreen = ({ navigation }: any) => {
             onChangeText={setFeedback}
             multiline
             numberOfLines={3}
+            accessibilityLabel="Feedback"
+            accessibilityHint="Share your feedback or suggestions"
           />
           <TouchableOpacity
             style={[styles.primaryBtn, submitting && { opacity: 0.7 }]}
             onPress={sendFeedback}
             disabled={submitting}
+            accessibilityLabel="Submit feedback"
+            accessibilityRole="button"
+            accessibilityHint="Submits your feedback to the team"
+            accessibilityState={{ disabled: submitting, busy: submitting }}
           >
             {submitting ? (
               <ActivityIndicator color={colors.card} size="small" />
@@ -222,6 +256,7 @@ const styles = StyleSheet.create({
   linkItem: {
     flexDirection: 'row',
     alignItems: 'center',
+    minHeight: a11y.minTouchTargetSize,
     paddingVertical: spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
@@ -237,13 +272,16 @@ const styles = StyleSheet.create({
     fontSize: typography.body,
     color: colors.textPrimary,
     marginBottom: spacing.md,
+    minHeight: a11y.minTouchTargetSize,
   },
   inputMultiline: { minHeight: 80, textAlignVertical: 'top' },
   primaryBtn: {
     backgroundColor: colors.primary,
     borderRadius: 10,
+    minHeight: a11y.minTouchTargetSize,
     paddingVertical: 14,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   primaryBtnText: { color: colors.card, fontSize: typography.body, fontWeight: typography.weightSemiBold },
   version: {

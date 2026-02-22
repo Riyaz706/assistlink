@@ -3,14 +3,11 @@ import { View, Text, StyleSheet, Alert, ActivityIndicator, Platform, TouchableOp
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
+import BottomNav from './BottomNav';
+import LeafletMap from './components/LeafletMap';
 
 // Conditional imports for native modules (not available on web)
 let Location: any = null;
-let MapView: any = null;
-let Marker: any = null;
-let Polyline: any = null;
-let PROVIDER_DEFAULT: any = null;
-let PROVIDER_GOOGLE: any = null;
 
 // Import expo-location (works on native platforms)
 if (Platform.OS !== 'web') {
@@ -19,56 +16,6 @@ if (Platform.OS !== 'web') {
   } catch (e) {
     console.warn('expo-location not available:', e);
   }
-}
-
-// Import react-native-maps (only works in development builds, not in Expo Go)
-// Metro config will replace this with a mock in Expo Go
-try {
-  const Maps = require('react-native-maps');
-  if (Maps && Maps.MapView) {
-    MapView = Maps.default || Maps.MapView || Maps;
-    Marker = Maps.Marker;
-    Polyline = Maps.Polyline;
-    PROVIDER_DEFAULT = Maps.PROVIDER_DEFAULT;
-    PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE;
-
-    // Mock sets PROVIDER_DEFAULT to undefined; real react-native-maps has it
-    if (PROVIDER_DEFAULT === undefined && MapView && typeof MapView === 'function') {
-      MapView = null;
-      Marker = null;
-      Polyline = null;
-      PROVIDER_DEFAULT = undefined;
-      PROVIDER_GOOGLE = undefined;
-    }
-  }
-} catch (e) {
-  console.warn('react-native-maps not available, using fallback:', e);
-}
-
-// Flag: true when real map is available, false when showing fallback (Expo Go / web / mock)
-let IS_MAP_AVAILABLE = true;
-
-// Web fallback components - use if MapView is null or if we detected it's the mock
-if (!MapView) {
-  IS_MAP_AVAILABLE = false;
-  MapView = ({ children, style, ...props }: any) => (
-    <View style={[style, { flex: 1, backgroundColor: '#EBF4EF', justifyContent: 'center', alignItems: 'center', padding: 24 }]}>
-      <Icon name="map-marker-off" size={56} color="#059669" />
-      <Text style={{ color: '#1F2937', fontSize: 18, fontWeight: '600', marginTop: 16, textAlign: 'center' }}>
-        Map view unavailable
-      </Text>
-      <Text style={{ color: '#6B7280', fontSize: 14, marginTop: 8, textAlign: 'center', paddingHorizontal: 24, lineHeight: 22 }}>
-        {Platform.OS === 'web'
-          ? 'Maps are available in the mobile app. You can open the destination in Google Maps below.'
-          : 'Use a development build (npx expo run:android) for in-app maps, or open in Google Maps below.'}
-      </Text>
-      {children}
-    </View>
-  );
-  Marker = ({ children }: any) => <View>{children}</View>;
-  Polyline = () => null;
-  PROVIDER_DEFAULT = undefined;
-  PROVIDER_GOOGLE = undefined;
 }
 
 // Location fallback
@@ -187,8 +134,6 @@ export default function CaregiverMapScreen({ route, navigation }: CaregiverMapSc
     longitudeDelta: 0.05,
   });
 
-  // Map reference
-  const mapRef = useRef<any>(null);
 
   // New UI states
   const [mapType, setMapType] = useState<'standard' | 'satellite' | 'hybrid'>('standard');
@@ -354,11 +299,6 @@ export default function CaregiverMapScreen({ route, navigation }: CaregiverMapSc
     };
 
     setMapRegion(newRegion);
-
-    // Animate map to new region
-    if (mapRef.current && mapRef.current.animateToRegion) {
-      mapRef.current.animateToRegion(newRegion, 1000);
-    }
   };
 
   // Calculate route using FREE OSRM public API
@@ -479,28 +419,26 @@ export default function CaregiverMapScreen({ route, navigation }: CaregiverMapSc
 
   // Center on caregiver location
   const centerOnCaregiver = () => {
-    if (caregiverLocation && mapRef.current) {
-      mapRef.current.animateToRegion({
+    if (caregiverLocation) {
+      setMapRegion({
         ...mapRegion,
         latitude: caregiverLocation.latitude,
         longitude: caregiverLocation.longitude,
         latitudeDelta: 0.01,
         longitudeDelta: 0.01,
-      }, 1000);
+      });
     }
   };
 
   // Center on recipient location
   const centerOnRecipient = () => {
-    if (mapRef.current) {
-      mapRef.current.animateToRegion({
-        ...mapRegion,
-        latitude: recipientLocation.latitude,
-        longitude: recipientLocation.longitude,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-      }, 1000);
-    }
+    setMapRegion({
+      ...mapRegion,
+      latitude: recipientLocation.latitude,
+      longitude: recipientLocation.longitude,
+      latitudeDelta: 0.01,
+      longitudeDelta: 0.01,
+    });
   };
 
   // Open destination in external maps (works with or without caregiver location)
@@ -563,124 +501,27 @@ export default function CaregiverMapScreen({ route, navigation }: CaregiverMapSc
     return Math.min(100, Math.max(0, ((maxDistance - routeData.distance) / maxDistance) * 100));
   };
 
-  // When map is unavailable (Expo Go / web / mock), show a clear fallback with Open in Maps
-  if (!IS_MAP_AVAILABLE) {
-    return (
-      <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
-        <View style={[styles.unavailableTopBar, { paddingTop: insets.top + 8 }]}>
-          {navigation && (
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.modernControlButton} activeOpacity={0.7}>
-              <Icon name="arrow-left" size={22} color="#000" />
-            </TouchableOpacity>
-          )}
-          <View style={styles.unavailableTitleWrap}>
-            <Text style={styles.topBarTitle} numberOfLines={1}>Track to {recipientName}</Text>
-            <Text style={styles.topBarSubtitle}>Care recipient location</Text>
-          </View>
-          <View style={styles.topBarPlaceholder} />
-        </View>
-        <View style={styles.unavailableContent}>
-          <View style={styles.unavailableCard}>
-            <Icon name="map-marker-off" size={56} color={THEME.primary} />
-            <Text style={styles.unavailableHeading}>Map view unavailable</Text>
-            <Text style={styles.unavailableMessage}>
-              {Platform.OS === 'web'
-                ? 'In-app maps are available in the mobile app. Open the destination in Google Maps to get directions.'
-                : 'For in-app maps, build with "npx expo run:android". You can still open the destination in Google Maps.'}
-            </Text>
-            <TouchableOpacity
-              style={styles.unavailableButton}
-              onPress={openInNavigation}
-              activeOpacity={0.8}
-              accessibilityLabel="Open destination in Google Maps"
-              accessibilityRole="button"
-            >
-              <Icon name="navigation" size={22} color="#FFF" />
-              <Text style={styles.unavailableButtonText}>Open in Google Maps</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  // Leaflet map center and zoom from region
+  const leafletCenter = { lat: mapRegion.latitude, lng: mapRegion.longitude };
+  const leafletZoom = Math.max(10, Math.min(18, Math.round(14 - Math.log2(mapRegion.latitudeDelta))));
+  const leafletMarkers = [
+    { id: 'recipient', lat: recipientLocation.latitude, lng: recipientLocation.longitude, label: `${recipientName} (Destination)` },
+    ...(caregiverLocation ? [{ id: 'caregiver', lat: caregiverLocation.latitude, lng: caregiverLocation.longitude, label: `${caregiverName} (You)` }] : []),
+  ];
+  const leafletPolyline = routeData && routeData.coordinates.length > 0
+    ? routeData.coordinates.map((c) => ({ lat: c.latitude, lng: c.longitude }))
+    : undefined;
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      {/* Map View */}
-      <MapView
-        ref={mapRef}
+      {/* Leaflet Map (OpenStreetMap) */}
+      <LeafletMap
+        center={leafletCenter}
+        zoom={leafletZoom}
+        markers={leafletMarkers}
+        polyline={leafletPolyline}
         style={styles.map}
-        provider={PROVIDER_GOOGLE ?? PROVIDER_DEFAULT}
-        initialRegion={mapRegion}
-        showsUserLocation={false} // We'll use custom markers
-        showsMyLocationButton={false}
-        mapType={mapType}
-        mapPadding={{
-          top: insets.top + 10,
-          right: 0,
-          bottom: insets.bottom + 80,
-          left: 0,
-        }}
-      >
-        {/* Recipient Marker (Fixed Location) */}
-        <Marker
-          coordinate={recipientLocation}
-          title={recipientName}
-          description="Care Recipient Location"
-          anchor={{ x: 0.5, y: 0.5 }}
-        >
-          <View style={styles.recipientMarkerContainer}>
-            <View style={styles.recipientMarkerShadow} />
-            <View style={styles.recipientMarker}>
-              <Icon name="map-marker" size={24} color="#FFFFFF" />
-            </View>
-            <View style={styles.markerLabel}>
-              <Text style={styles.markerLabelText}>{recipientName}</Text>
-              <Text style={styles.markerLabelSubtext}>Destination</Text>
-            </View>
-          </View>
-        </Marker>
-
-        {/* Caregiver Marker (Device Location) */}
-        {caregiverLocation && (
-          <Marker
-            coordinate={caregiverLocation}
-            title={caregiverName}
-            description="Caregiver Location"
-            anchor={{ x: 0.5, y: 0.5 }}
-          >
-            <View style={styles.caregiverMarkerContainer}>
-              {isTracking && (
-                <View style={styles.trackingPulse} />
-              )}
-              <View style={styles.caregiverMarkerShadow} />
-              <View style={styles.caregiverMarker}>
-                <Icon name="account" size={20} color="#FFFFFF" />
-                {isTracking && (
-                  <View style={styles.trackingIndicator}>
-                    <View style={styles.trackingDotInner} />
-                  </View>
-                )}
-              </View>
-              <View style={styles.markerLabel}>
-                <Text style={styles.markerLabelText}>{caregiverName}</Text>
-                <Text style={styles.markerLabelSubtext}>You</Text>
-              </View>
-            </View>
-          </Marker>
-        )}
-
-        {/* Route Polyline */}
-        {routeData && routeData.coordinates.length > 0 && (
-          <Polyline
-            coordinates={routeData.coordinates}
-            strokeColor={THEME.primary}
-            strokeWidth={4}
-            lineCap="round"
-            lineJoin="round"
-          />
-        )}
-      </MapView>
+      />
 
       {/* Error Messages - below top bar */}
       <View style={[styles.errorBannerWrapper, { top: insets.top + 56 }]}>
@@ -996,6 +837,7 @@ export default function CaregiverMapScreen({ route, navigation }: CaregiverMapSc
           <Text style={styles.noRouteText}>Getting your location...</Text>
         )}
       </Animated.View>
+      <BottomNav />
     </SafeAreaView>
   );
 }

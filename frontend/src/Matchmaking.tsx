@@ -11,12 +11,13 @@ import {
   Switch,
   Dimensions,
   Alert,
-  ActivityIndicator
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRoute, useFocusEffect } from '@react-navigation/native';
 import { api } from './api/client';
+import BottomNav from './BottomNav';
 
 const { width } = Dimensions.get('window');
 
@@ -95,6 +96,7 @@ const MatchmakingScreen = ({ navigation }: any) => {
   const [caregivers, setCaregivers] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [profileModalCaregiver, setProfileModalCaregiver] = useState<any>(null);
 
   // Always refresh caregivers whenever this screen gains focus,
   // so that recently completed bookings immediately free caregivers
@@ -242,6 +244,30 @@ const MatchmakingScreen = ({ navigation }: any) => {
     setSelectionModalVisible(false);
     setSelectedCaregiver(null);
     setBookingStep('type');
+  };
+
+  const handleAutoAssign = () => {
+    const first = displayedCaregivers.length > 0 ? displayedCaregivers[0] : null;
+    if (first) {
+      setSelectedCaregiver(first);
+      setBookingStep('type');
+      setSelectionModalVisible(true);
+    } else {
+      Alert.alert('No caregivers', 'No available caregivers at the moment. Please try again later.');
+    }
+  };
+
+  const handleProfilePress = (item: any) => {
+    setProfileModalCaregiver(item);
+  };
+
+  const handleViewMap = () => {
+    const first = displayedCaregivers[0];
+    (navigation as any).navigate('CaregiverMapScreen', {
+      recipientLocation: { latitude: 17.3850, longitude: 78.4867 },
+      recipientName: 'You',
+      caregiverName: first?.name || 'Caregiver',
+    });
   };
 
   // --- RENDER HELPERS ---
@@ -458,10 +484,10 @@ const MatchmakingScreen = ({ navigation }: any) => {
           </View>
         </View>
         <View style={styles.tagRow}>
-          {item.tags.map((tag: string, i: number) => (
+          {(item.tags || []).map((tag: string, i: number) => (
             <View key={`skill-${i}`} style={styles.tag}><Text style={styles.tagText}>{tag}</Text></View>
           ))}
-          {item.qualifications.map((qual: string, i: number) => (
+          {(item.qualifications || []).map((qual: string, i: number) => (
             <View key={`qual-${i}`} style={[styles.tag, styles.qualTag]}><Text style={styles.qualTagText}>{qual}</Text></View>
           ))}
         </View>
@@ -474,7 +500,9 @@ const MatchmakingScreen = ({ navigation }: any) => {
             {isBusy ? (
               <View style={styles.unavailableBtn}><Text style={styles.unavailableText}>Unavail.</Text></View>
             ) : (
-              <TouchableOpacity style={styles.profileBtn}><Text style={styles.profileBtnText}>Profile</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.profileBtn} onPress={() => handleProfilePress(item)}>
+                <Text style={styles.profileBtnText}>Profile</Text>
+              </TouchableOpacity>
             )}
             <TouchableOpacity
               style={[styles.selectBtn, isBusy && styles.selectBtnDisabled]}
@@ -490,7 +518,7 @@ const MatchmakingScreen = ({ navigation }: any) => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="dark-content" backgroundColor="#F5F7FA" />
 
       {/* Header */}
@@ -512,7 +540,9 @@ const MatchmakingScreen = ({ navigation }: any) => {
               <Text style={styles.fastMatchTitle}> Fast Match</Text>
             </View>
             <Text style={styles.fastMatchDesc}>Instantly match with the highest-rated available caregiver.</Text>
-            <TouchableOpacity style={styles.autoAssignBtn}><Text style={styles.autoAssignText}>Auto-Assign Now</Text></TouchableOpacity>
+            <TouchableOpacity style={styles.autoAssignBtn} onPress={handleAutoAssign}>
+              <Text style={styles.autoAssignText}>Auto-Assign Now</Text>
+            </TouchableOpacity>
           </View>
           <View style={styles.graphicPlaceholder}>
             <View style={styles.graphicLine1} />
@@ -531,7 +561,9 @@ const MatchmakingScreen = ({ navigation }: any) => {
 
         <View style={styles.listHeader}>
           <Text style={styles.listTitle}>Available ({displayedCaregivers.length})</Text>
-          <TouchableOpacity><Text style={styles.viewMapText}>View Map</Text></TouchableOpacity>
+          <TouchableOpacity onPress={handleViewMap}>
+            <Text style={styles.viewMapText}>View Map</Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.listContainer}>
@@ -564,9 +596,79 @@ const MatchmakingScreen = ({ navigation }: any) => {
         </View>
       </Modal>
 
+      {/* PROFILE MODAL */}
+      <Modal animationType="slide" transparent={true} visible={!!profileModalCaregiver} onRequestClose={() => setProfileModalCaregiver(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxHeight: '85%' }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Caregiver Profile</Text>
+              <TouchableOpacity onPress={() => setProfileModalCaregiver(null)}>
+                <Ionicons name="close" size={24} color="#333" />
+              </TouchableOpacity>
+            </View>
+            {profileModalCaregiver && (
+              <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
+                <View style={{ alignItems: 'center', marginBottom: 16 }}>
+                  {profileModalCaregiver.image ? (
+                    <Image source={{ uri: profileModalCaregiver.image }} style={{ width: 80, height: 80, borderRadius: 40 }} />
+                  ) : (
+                    <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center' }}>
+                      <MaterialCommunityIcons name="account" size={40} color="#6B7280" />
+                    </View>
+                  )}
+                  <Text style={{ fontSize: 18, fontWeight: '700', color: '#111', marginTop: 12 }}>{profileModalCaregiver.name}</Text>
+                  <Text style={{ fontSize: 14, color: '#666', marginTop: 4 }} numberOfLines={2}>{profileModalCaregiver.role}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
+                    <Ionicons name="star" size={16} color="#059669" />
+                    <Text style={{ marginLeft: 4, fontWeight: '600' }}>{profileModalCaregiver.rating}</Text>
+                    <Text style={{ marginLeft: 4, color: '#666', fontSize: 13 }}>({profileModalCaregiver.reviews} reviews)</Text>
+                  </View>
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: '#059669', marginTop: 8 }}>₹{profileModalCaregiver.price}/hr</Text>
+                </View>
+                <View style={{ paddingHorizontal: 4 }}>
+                  {(profileModalCaregiver.tags || []).length > 0 && (
+                    <>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#666', marginBottom: 6 }}>SKILLS</Text>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 12 }}>
+                        {(profileModalCaregiver.tags || []).map((tag: string, i: number) => (
+                          <View key={i} style={[styles.tag, { marginRight: 6, marginBottom: 6 }]}>
+                            <Text style={styles.tagText}>{tag}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </>
+                  )}
+                  {(profileModalCaregiver.qualifications || []).length > 0 && (
+                    <>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#666', marginBottom: 6 }}>QUALIFICATIONS</Text>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 12 }}>
+                        {(profileModalCaregiver.qualifications || []).map((qual: string, i: number) => (
+                          <View key={i} style={[styles.qualTag, styles.tag, { marginRight: 6, marginBottom: 6 }]}>
+                            <Text style={styles.qualTagText}>{qual}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </>
+                  )}
+                </View>
+                <View style={{ flexDirection: 'row', paddingHorizontal: 4, gap: 10, marginTop: 8, marginBottom: 20 }}>
+                  <TouchableOpacity style={[styles.profileBtn, { flex: 1 }]} onPress={() => { setProfileModalCaregiver(null); handleSelectPress(profileModalCaregiver); }}>
+                    <Text style={styles.profileBtnText}>Select</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.selectBtn, { flex: 1 }]} onPress={() => setProfileModalCaregiver(null)}>
+                    <Text style={styles.selectBtnText}>Close</Text>
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
+
       {/* POPUP SELECTION & SUCCESS CONTAINER */}
       {renderSelectionModal()}
 
+      <BottomNav />
     </SafeAreaView>
   );
 };

@@ -12,6 +12,7 @@ import {
   Platform
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import BottomNav from './BottomNav';
 import { Ionicons, MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { api } from './api/client';
 import { useErrorHandler, ErrorDetails } from './hooks/useErrorHandler';
@@ -122,15 +123,13 @@ export default function CaregiverAppointmentDetailScreen({ route, navigation }: 
 
             // Check if this is a video call request
             if (appointment.isVideoCall) {
-              // It's a video call request
               await api.acceptVideoCallRequest(appointment.id, false);
               console.log('[AppointmentDetail] Video call declined successfully');
             } else {
-              // It's a regular booking - would need a different API call
-              console.log('[AppointmentDetail] Regular booking decline not yet implemented');
-              Alert.alert('Info', 'Regular booking decline coming soon');
-              setLoading(false);
-              return;
+              // Regular booking: decline via booking respond API
+              await api.respondToBooking(appointment.id, 'rejected');
+              setStatus('Declined');
+              console.log('[AppointmentDetail] Booking declined successfully');
             }
 
             Alert.alert('Success', 'Appointment declined', [
@@ -291,7 +290,7 @@ export default function CaregiverAppointmentDetailScreen({ route, navigation }: 
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       {/* HEADER */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
@@ -321,11 +320,11 @@ export default function CaregiverAppointmentDetailScreen({ route, navigation }: 
           <Text style={styles.statusLabel}>Status:</Text>
           <View style={[
             styles.statusBadge,
-            status === 'Pending' ? styles.bgOrange : styles.bgGreen
+            status === 'Pending' ? styles.bgOrange : status === 'Declined' ? styles.bgRed : styles.bgGreen
           ]}>
             <Text style={[
               styles.statusText,
-              status === 'Pending' ? styles.textOrange : styles.textGreen
+              status === 'Pending' ? styles.textOrange : status === 'Declined' ? styles.textRed : styles.textGreen
             ]}>
               {status ? status.toUpperCase() : 'UNKNOWN'}
             </Text>
@@ -343,7 +342,7 @@ export default function CaregiverAppointmentDetailScreen({ route, navigation }: 
               <Text style={styles.name}>{appointment.recipient}</Text>
               <Text style={styles.subDetail}>Age 78 • Mobility Issues</Text>
             </View>
-            {status !== 'Pending' && (
+            {status !== 'Pending' && status !== 'Declined' && (
               <TouchableOpacity
                 style={styles.chatBtn}
                 onPress={() => {
@@ -412,6 +411,11 @@ export default function CaregiverAppointmentDetailScreen({ route, navigation }: 
               <ActivityIndicator size="large" color={THEME.primary} />
               <Text style={{ marginTop: 10, color: THEME.subText }}>Processing...</Text>
             </View>
+          ) : status === 'Declined' ? (
+            <View style={styles.declinedMessage}>
+              <Icon name="close-circle-outline" size={24} color={THEME.danger} style={{ marginRight: 8 }} />
+              <Text style={styles.declinedMessageText}>You declined this appointment.</Text>
+            </View>
           ) : status === 'Pending' ? (
             <View style={styles.buttonRow}>
               <TouchableOpacity style={styles.btnDecline} onPress={handleDecline}>
@@ -426,16 +430,17 @@ export default function CaregiverAppointmentDetailScreen({ route, navigation }: 
               <Icon name="play-circle" size={20} color="#FFF" style={{ marginRight: 8 }} />
               <Text style={styles.btnPrimaryText}>Start Care Session</Text>
             </TouchableOpacity>
-          ) : (
+          ) : (status === 'In-Progress' || status?.toLowerCase() === 'in_progress') ? (
             <TouchableOpacity style={styles.btnSuccess} onPress={handleComplete}>
               <Icon name="check-all" size={20} color="#FFF" style={{ marginRight: 8 }} />
               <Text style={styles.btnPrimaryText}>Mark as Complete</Text>
             </TouchableOpacity>
-          )}
+          ) : null}
         </View>
 
         <View style={{ height: 40 }} />
       </ScrollView>
+      <BottomNav />
     </SafeAreaView>
   );
 }
@@ -466,8 +471,12 @@ const styles = StyleSheet.create({
   // Status Colors
   bgOrange: { backgroundColor: '#FEF3C7' },
   bgGreen: { backgroundColor: '#D1FAE5' },
+  bgRed: { backgroundColor: '#FEE2E2' },
   textOrange: { color: '#D97706' },
   textGreen: { color: '#059669' },
+  textRed: { color: '#DC2626' },
+  declinedMessage: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16, backgroundColor: '#FEF2F2', borderRadius: 12 },
+  declinedMessageText: { color: THEME.danger, fontWeight: '600', fontSize: 15 },
 
   card: {
     backgroundColor: THEME.card, borderRadius: 16, padding: 16, marginBottom: 24,

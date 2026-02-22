@@ -67,8 +67,8 @@ async def create_notification(
     except Exception as e:
         import sys
         import traceback
-        print(f"❌ Error creating notification: {e}", file=sys.stderr, flush=True)
-        traceback.print_exc()
+        print(f"❌ Error creating notification (type={notification_type}, user_id={user_id}): {e}", file=sys.stderr, flush=True)
+        traceback.print_exc(file=sys.stderr)
         return None
 
 
@@ -365,6 +365,39 @@ async def notify_booking_created(caregiver_id: str, care_recipient_name: str, bo
             "action": "view_booking"
         }
     )
+
+
+async def update_notifications_booking_status(
+    booking_id: str, new_status: str, user_ids: Optional[list] = None
+) -> None:
+    """
+    Update notifications that reference this booking_id so their data includes
+    booking_status and title/body show "Accepted" or "Declined". This lets the app
+    hide Accept/Decline, exclude them from Requests tab, and show "Accepted" after accept.
+    If user_ids is provided, only those users' notifications are considered.
+    """
+    try:
+        query = supabase_admin.table("notifications").select("id, data, title").eq("type", "booking")
+        if user_ids:
+            query = query.in_("user_id", [str(u) for u in user_ids])
+        res = query.execute()
+        for row in (res.data or []):
+            data = row.get("data") or {}
+            if not isinstance(data, dict) or str(data.get("booking_id")) != str(booking_id):
+                continue
+            merged = {**data, "booking_status": new_status}
+            update_payload = {"data": merged}
+            # Mark as accepted/declined in title and message so UI shows "Accepted" after accept
+            if new_status == "accepted":
+                update_payload["title"] = "Accepted"
+                update_payload["message"] = "You accepted this booking request."
+            elif new_status == "cancelled":
+                update_payload["title"] = "Declined"
+                update_payload["message"] = "You declined this booking request."
+            supabase_admin.table("notifications").update(update_payload).eq("id", row["id"]).execute()
+    except Exception as e:
+        import sys
+        print(f"[WARN] update_notifications_booking_status failed: {e}", file=sys.stderr, flush=True)
 
 
 async def notify_booking_status_change(user_id: str, booking_id: str, status: str, other_party_name: str):

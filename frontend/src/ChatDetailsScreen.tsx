@@ -18,6 +18,7 @@ import { api } from './api/client';
 import { useAuth } from './context/AuthContext';
 import { useErrorHandler } from './hooks/useErrorHandler';
 import { useIsFocused } from '@react-navigation/native';
+import BottomNav from './BottomNav';
 
 const THEME = {
   bg: "#F5F7F5",
@@ -345,6 +346,7 @@ const ChatDetailsScreen = ({ route, navigation }: any) => {
           </View>
         </View>
       </KeyboardAvoidingView>
+      <BottomNav />
     </SafeAreaView>
   );
 };

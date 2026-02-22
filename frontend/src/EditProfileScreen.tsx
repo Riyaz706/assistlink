@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import BottomNav from './BottomNav';
 import { useAuth } from './context/AuthContext';
 import { api } from './api/client';
 
@@ -276,7 +277,7 @@ export default function EditProfileScreen({ navigation, route }: any) {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
@@ -475,6 +476,7 @@ export default function EditProfileScreen({ navigation, route }: any) {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+      <BottomNav />
     </SafeAreaView>
   );
 }

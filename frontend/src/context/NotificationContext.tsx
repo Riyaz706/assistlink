@@ -1,8 +1,9 @@
-import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
+import React, { createContext, useCallback, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { Alert, Platform } from 'react-native';
 import { useAuth } from './AuthContext';
 import { api } from '../api/client';
 import * as RootNavigation from '../navigation/RootNavigation';
+import { getSupabase } from '../lib/supabase';
 
 // --- TYPES ---
 export interface Assignment {
@@ -48,8 +49,15 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
 
     // Load upcoming assignments from API
     const loadBookings = async (silent = false) => {
-        // Only poll if user is logged in and is a caregiver
-        if (!user || (user as any).role !== 'caregiver') {
+        if (!user?.id) {
+            setAssignments([]);
+            setActiveEmergency(null);
+            return;
+        }
+        // Resolve role: prefer user.role (from /me), fallback to user_metadata for caregiver
+        const role = (user as any).role ?? (user as any).user_metadata?.role;
+        if (role !== 'caregiver') {
+            setAssignments([]);
             setActiveEmergency(null);
             return;
         }
@@ -59,19 +67,25 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
                 setLoading(true);
             }
 
-            // Fetch both regular bookings AND video call requests
+            // Fetch both regular bookings AND video call requests (no upcoming_only so caregiver sees all active)
             const [bookings, videoCalls] = await Promise.all([
                 api.getDashboardBookings({
-                    status: 'requested,pending,accepted,in_progress', // include requested so caregiver sees new requests
-                    upcoming_only: true, // Filter out past bookings (includes undated pending)
+                    status: 'requested,pending,accepted,confirmed,in_progress',
+                    upcoming_only: false,
                     limit: 50
                 }),
                 api.getDashboardVideoCalls({ limit: 100 })
             ]);
 
+            const rawBookings = Array.isArray(bookings) ? bookings : [];
+            if (!silent) {
+                console.log('[NotificationContext] Dashboard bookings count:', rawBookings.length, 'video calls:', Array.isArray(videoCalls) ? videoCalls.length : 0);
+            }
+
             // Transform regular bookings to assignments
-            const bookingAssignments: Assignment[] = (Array.isArray(bookings) ? bookings : []).map((booking: any) => {
-                const careRecipient = booking.care_recipient || {};
+            const bookingAssignments: Assignment[] = rawBookings.map((booking: any) => {
+                const rawRecipient = booking.care_recipient;
+                const careRecipient = Array.isArray(rawRecipient) ? (rawRecipient[0] || {}) : (rawRecipient || {});
                 const serviceTypeMap: Record<string, string> = {
                     'exam_assistance': 'Exam Assistance',
                     'daily_care': 'Daily Care',
@@ -128,16 +142,17 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
             });
 
             // Transform video calls to assignments (only upcoming / pending)
-            const upcomingVideoCalls = (Array.isArray(videoCalls) ? videoCalls : []).filter((vc: any) => {
+            const rawVideoCalls = Array.isArray(videoCalls) ? videoCalls : [];
+            const upcomingVideoCalls = rawVideoCalls.filter((vc: any) => {
                 const status = (vc.status || '').toLowerCase();
                 if (!['pending', 'accepted', 'in_progress'].includes(status)) return false;
                 if (!vc.scheduled_time) return true;
                 return new Date(vc.scheduled_time) >= new Date();
             });
             const videoCallAssignments: Assignment[] = upcomingVideoCalls.map((videoCall: any) => {
-                const careRecipient = videoCall.care_recipient || {};
+                const rawVcRecipient = videoCall.care_recipient;
+                const vcRecipient = Array.isArray(rawVcRecipient) ? (rawVcRecipient[0] || {}) : (rawVcRecipient || {});
 
-                // Format date and time
                 let timeStr = 'Date not set';
                 if (videoCall.scheduled_time) {
                     const scheduledDate = new Date(videoCall.scheduled_time);
@@ -153,25 +168,24 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
                     timeStr = `${dateStr} at ${time}`;
                 }
 
-                // Format location
                 let locationStr = 'Video Call';
-                if (careRecipient.address) {
-                    if (typeof careRecipient.address === 'string') {
-                        locationStr = `Video Call - ${careRecipient.address}`;
-                    } else if (careRecipient.address.text) {
-                        locationStr = `Video Call - ${careRecipient.address.text}`;
+                if (vcRecipient.address) {
+                    if (typeof vcRecipient.address === 'string') {
+                        locationStr = `Video Call - ${vcRecipient.address}`;
+                    } else if (vcRecipient.address.text) {
+                        locationStr = `Video Call - ${vcRecipient.address.text}`;
                     }
                 }
 
                 return {
                     id: videoCall.id,
-                    clientName: careRecipient.full_name || 'Care Recipient',
+                    clientName: vcRecipient.full_name || 'Care Recipient',
                     service: 'Video Call',
                     status: videoCall.status?.charAt(0).toUpperCase() + videoCall.status?.slice(1) || 'Pending',
                     time: timeStr,
                     address: locationStr,
-                    image: careRecipient.profile_photo_url || undefined,
-                    bookingData: videoCall, // Store full video call data
+                    image: vcRecipient.profile_photo_url || undefined,
+                    bookingData: videoCall,
                 };
             });
 
@@ -230,26 +244,7 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
             isFirstLoad.current = false;
             setAssignments(allAssignments);
 
-            // 3. Fetch Emergency Notifications
-            const notificationsRes = await api.getNotifications({
-                type: 'emergency',
-                is_read: false,
-                limit: 1
-            }) as any[];
-
-            if (notificationsRes && notificationsRes.length > 0) {
-                const latestEmergency = notificationsRes[0];
-                setActiveEmergency({
-                    id: latestEmergency.id,
-                    user_id: latestEmergency.user_id,
-                    recipientName: latestEmergency.data?.care_recipient_name || 'Care Recipient',
-                    message: latestEmergency.message,
-                    data: latestEmergency.data,
-                    created_at: latestEmergency.created_at
-                });
-            } else {
-                setActiveEmergency(null);
-            }
+            // 3. Emergency notifications are loaded by loadEmergencies() for all users (see useEffect)
 
         } catch (e: any) {
             console.error("[NotificationContext] Failed to load assignments:", e);
@@ -263,31 +258,107 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
         setActiveEmergency(null);
     };
 
+    // Fetch emergency notifications for current user (caregivers receive these; care recipients get [])
+    const loadEmergencies = async (silent = false) => {
+        if (!user?.id) {
+            setActiveEmergency(null);
+            return;
+        }
+        try {
+            const notificationsRes = await api.getNotifications({
+                type: 'emergency',
+                is_read: false,
+                limit: 5
+            }) as any;
+            const list = Array.isArray(notificationsRes)
+                ? notificationsRes
+                : (notificationsRes?.data ?? notificationsRes?.notifications ?? []);
+            const latestEmergency = list.length > 0 ? list[0] : null;
+            if (latestEmergency) {
+                setActiveEmergency({
+                    id: latestEmergency.id,
+                    user_id: latestEmergency.user_id,
+                    recipientName: latestEmergency.data?.care_recipient_name || 'Care Recipient',
+                    message: latestEmergency.message ?? latestEmergency.body ?? '',
+                    data: latestEmergency.data ?? {},
+                    created_at: latestEmergency.created_at
+                });
+            } else {
+                setActiveEmergency(null);
+            }
+        } catch (err: any) {
+            setActiveEmergency(null);
+            if (!silent && err?.statusCode !== 401) {
+                console.warn('[NotificationContext] Emergency notifications:', err?.message || err);
+            }
+        }
+    };
+
     useEffect(() => {
-        // Initial load logic
-        if (user && (user as any).role === 'caregiver') {
+        const role = user ? ((user as any).role ?? (user as any).user_metadata?.role) : null;
+        // Always fetch emergency notifications when user is logged in (caregivers get them; banner only shows for caregiver UI)
+        if (user?.id) {
+            loadEmergencies(true);
+        }
+        if (user?.id && role === 'caregiver') {
             loadBookings();
 
-            // Polling every 30 seconds (reduced from 5s to avoid request storm and timeouts)
-            const intervalId = setInterval(() => {
-                loadBookings(true); // Silent refresh
-            }, 30000);
+            const userId = String(user.id);
+            let realtimeChannel: { unsubscribe: () => void } | null = null;
+            const supabase = getSupabase();
+            if (supabase) {
+                try {
+                    realtimeChannel = supabase
+                        .channel(`notifications:${userId}`)
+                        .on(
+                            'postgres_changes',
+                            {
+                                event: 'INSERT',
+                                schema: 'public',
+                                table: 'notifications',
+                                filter: `user_id=eq.${userId}`,
+                            },
+                            () => {
+                                loadBookings(true);
+                                loadEmergencies(true);
+                            }
+                        )
+                        .subscribe();
+                } catch (e) {
+                    console.warn('[NotificationContext] Realtime subscribe failed:', e);
+                }
+            }
 
-            return () => clearInterval(intervalId);
+            const intervalId = setInterval(() => {
+                loadBookings(true);
+                loadEmergencies(true);
+            }, 10000);
+
+            return () => {
+                clearInterval(intervalId);
+                if (realtimeChannel?.unsubscribe) realtimeChannel.unsubscribe();
+            };
         } else {
-            // Reset if user logs out or changes
             setAssignments([]);
+            if (!user?.id) setActiveEmergency(null);
             prevAssignmentsCount.current = 0;
             isFirstLoad.current = true;
         }
-    }, [user]); // Re-run when user changes
+    }, [user?.id, (user as any)?.role, (user as any)?.user_metadata?.role]);
+
+    const refreshRef = useRef({ loadBookings, loadEmergencies });
+    refreshRef.current = { loadBookings, loadEmergencies };
+    const refresh = useCallback(async (silent?: boolean) => {
+        await refreshRef.current.loadBookings(silent);
+        await refreshRef.current.loadEmergencies(silent);
+    }, []);
 
     return (
         <NotificationContext.Provider value={{
             assignments,
             activeEmergency,
             loading,
-            refresh: (silent) => loadBookings(silent),
+            refresh,
             dismissEmergency
         }}>
             {children}

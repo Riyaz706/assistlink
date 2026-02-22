@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
+import BottomNav from './BottomNav';
 
 // --- THEME FROM ChatDetailScreen ---
 const THEME = {
@@ -218,6 +219,7 @@ export default function ChatDetailScreen2({ route, navigation }: Props) {
           </View>
         </View>
       </KeyboardAvoidingView>
+      <BottomNav />
     </SafeAreaView>
   );
 }

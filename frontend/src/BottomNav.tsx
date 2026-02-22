@@ -6,6 +6,19 @@ import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { colors, typography, accessibility } from './theme';
 import { useAuth } from './context/AuthContext';
 
+/** Screens that belong to each tab (for highlighting when on a detail screen) */
+const SCREENS_BY_TAB: Record<string, string[]> = {
+  CaregiverDashboard: ['CaregiverDashboard', 'CaregiverAppointmentDetailScreen', 'UpcomingVisitScreen', 'CaregiverMapScreen'],
+  ScheduleScreen2: ['ScheduleScreen2'],
+  ChatList2: ['ChatList2', 'ChatDetailScreen2'],
+  ProfileScreen2: ['ProfileScreen2', 'Settings', 'EditProfile', 'ChangePassword', 'HelpSupport', 'NSSPortal'],
+  CareRecipientDashboard: ['CareRecipientDashboard', 'BookingsScreen', 'BookingDetailScreen', 'MatchmakingScreen', 'PaymentScreen', 'UpcomingVisitScreen', 'CaregiverMapScreen'],
+  NewRequestScreen: ['NewRequestScreen', 'MatchmakingScreen'],
+  Schedule: ['Schedule'],
+  ChatList: ['ChatList', 'ChatDetailsScreen'],
+  Profile: ['Profile', 'Settings', 'EditProfile', 'ChangePassword', 'HelpSupport', 'NSSPortal'],
+};
+
 /**
  * Bottom tab navigation - PRD: 5 tabs for PWA mobile experience.
  * Role-aware: care_recipient gets Home/Requests/Schedule/Messages/Profile;
@@ -15,9 +28,16 @@ const BottomNav = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const { user } = useAuth();
-  const isCaregiver = user?.role === 'caregiver';
+  const isCaregiver = user?.role === 'caregiver' || (user as any)?.user_metadata?.role === 'caregiver';
 
-  const isActive = (screenName: string) => route?.name === screenName;
+  const currentRouteName = route?.name ?? '';
+
+  const isActive = (screenName: string) => {
+    if (currentRouteName === screenName) return true;
+    const screens = SCREENS_BY_TAB[screenName];
+    return screens ? screens.includes(currentRouteName) : false;
+  };
+
   const activeColor = colors.secondary;
   const inactiveColor = colors.textSecondary;
 
@@ -44,20 +64,26 @@ const BottomNav = () => {
           return (
             <Pressable
               key={name}
-              style={({ pressed }) => [styles.tab, pressed && styles.tabPressed]}
+              style={({ pressed }) => [
+                styles.tab,
+                active && styles.tabActive,
+                pressed && styles.tabPressed,
+              ]}
               onPress={() => navigation.navigate(name)}
-
               delayLongPress={200}
-              accessibilityRole="button"
+              accessibilityRole="tab"
               accessibilityLabel={label}
+              accessibilityHint={active ? `${label} tab selected` : `Switch to ${label} tab`}
               accessibilityState={{ selected: active }}
             >
-              <Icon
-                name={(active ? icon : iconOutline) as any}
-                size={26}
-                color={active ? activeColor : inactiveColor}
-              />
-              <Text style={[styles.label, active && styles.activeLabel]}>{label}</Text>
+              <View style={[styles.iconWrap, active && styles.iconWrapActive]}>
+                <Icon
+                  name={(active ? icon : iconOutline) as any}
+                  size={22}
+                  color={active ? '#fff' : inactiveColor}
+                />
+              </View>
+              <Text style={[styles.label, active && styles.activeLabel]} numberOfLines={1}>{label}</Text>
             </Pressable>
           );
         })}
@@ -73,28 +99,44 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     backgroundColor: colors.card,
-    paddingVertical: 10,
-    paddingHorizontal: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
     borderTopWidth: 1,
     borderTopColor: colors.border,
     justifyContent: 'space-between',
     alignItems: 'center',
-    minHeight: Math.max(70, accessibility.minTouchTargetSize + 16),
-    paddingBottom: Platform.OS === 'android' ? 8 : 10,
+    minHeight: 56,
+    paddingBottom: Platform.OS === 'android' ? 4 : 6,
   },
   tab: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 56,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
     minHeight: accessibility.minTouchTargetSize,
   },
+  tabActive: {
+    // Pill is on iconWrap; tab just gets no extra bg for flexibility
+  },
+  iconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconWrapActive: {
+    backgroundColor: colors.secondary,
+  },
   tabPressed: {
-    opacity: 0.6,
+    opacity: 0.7,
   },
   label: {
-    fontSize: typography.bodySmall,
-    marginTop: 4,
+    fontSize: 10,
+    marginTop: 2,
     color: colors.textSecondary,
+    fontWeight: typography.weightMedium,
   },
   activeLabel: {
     color: colors.secondary,

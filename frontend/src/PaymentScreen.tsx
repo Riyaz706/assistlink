@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { api } from './api/client';
+import BottomNav from './BottomNav';
 
 // Razorpay SDK (native) - only available in dev/production builds, not Expo Go
 let RazorpayCheckout: typeof import('react-native-razorpay') | null = null;
@@ -108,7 +109,7 @@ const PaymentScreen = () => {
   const canPay = Boolean(bookingId);
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
         <TouchableOpacity
           onPress={() => navigation.goBack()}
@@ -143,6 +144,7 @@ const PaymentScreen = () => {
           )}
         </TouchableOpacity>
       </View>
+      <BottomNav />
     </SafeAreaView>
   );
 };

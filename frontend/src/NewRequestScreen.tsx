@@ -4,12 +4,11 @@ import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { api } from './api/client';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useErrorHandler, ErrorDetails } from './hooks/useErrorHandler';
+import BottomNav from './BottomNav';
+import LeafletMap from './components/LeafletMap';
 
 // Conditional imports for native modules (not available on web)
 let Location: any = null;
-let MapView: any = null;
-let Marker: any = null;
-let PROVIDER_DEFAULT: any = null;
 
 const ErrorBanner = ({ error, onDismiss }: { error: ErrorDetails | null, onDismiss: () => void }) => {
   if (!error) return null;
@@ -33,49 +32,7 @@ if (Platform.OS !== 'web') {
   }
 }
 
-// Import react-native-maps (only works in development builds, not in Expo Go)
-// Metro config will replace this with a mock in Expo Go
-try {
-  const Maps = require('react-native-maps');
-  // Check if this is the mock (won't have native properties) or real maps
-  if (Maps && Maps.MapView) {
-    MapView = Maps.default || Maps.MapView || Maps;
-    Marker = Maps.Marker;
-    PROVIDER_DEFAULT = Maps.PROVIDER_DEFAULT;
-
-    // Check if this is the mock: mock sets PROVIDER_DEFAULT to undefined
-    // Real react-native-maps would have a PROVIDER_DEFAULT value
-    if (PROVIDER_DEFAULT === undefined && MapView && typeof MapView === 'function') {
-      // This is the mock - use fallback instead
-      MapView = null;
-      Marker = null;
-      PROVIDER_DEFAULT = undefined;
-    }
-  }
-} catch (e) {
-  // If require fails, Metro should have replaced it with mock, but just in case:
-  console.warn('react-native-maps not available, using fallback:', e);
-}
-
-// Web fallback components - use if MapView is null or if we detected it's the mock
-if (!MapView) {
-  MapView = ({ children, style, onPress, ...props }: any) => (
-    <View style={[style, { backgroundColor: '#EBF4EF', justifyContent: 'center', alignItems: 'center', padding: 20, minHeight: 300 }]}>
-      <Icon name="map-marker-off" size={64} color="#059669" />
-      <Text style={{ color: '#1F2937', fontSize: 18, fontWeight: '600', marginTop: 16, textAlign: 'center' }}>
-        Map View Unavailable
-      </Text>
-      <Text style={{ color: '#6B7280', fontSize: 14, marginTop: 8, textAlign: 'center', paddingHorizontal: 20, lineHeight: 20 }}>
-        {Platform.OS === 'web'
-          ? 'Map features are only available on mobile devices. Please use the Android app for full functionality.'
-          : 'Map features require a development build and are not available in Expo Go. Please build the app using "npx expo run:android" to enable map features.'}
-      </Text>
-      {children}
-    </View>
-  );
-  Marker = ({ children }: any) => <View>{children}</View>;
-  PROVIDER_DEFAULT = undefined;
-}
+// Maps use Leaflet (LeafletMap component)
 
 // Location fallback
 if (!Location) {
@@ -475,7 +432,6 @@ const NewRequestScreen = ({ navigation }: any) => {
     longitudeDelta: 0.01,
   });
   const [locationLoading, setLocationLoading] = useState(false);
-  const mapRef = useRef<any>(null);
 
   // Get current location
   const getCurrentLocation = async () => {
@@ -548,14 +504,7 @@ const NewRequestScreen = ({ navigation }: any) => {
         setLocationText('Current Location');
       }
 
-      // Animate map to location
-      if (mapRef.current && mapRef.current.animateToRegion) {
-        mapRef.current.animateToRegion({
-          ...mapRegion,
-          latitude: newLocation.latitude,
-          longitude: newLocation.longitude,
-        }, 1000);
-      }
+      // Map center updates via mapRegion state (LeafletMap is controlled)
     } catch (error: any) {
       handleError(error, 'location-error');
     } finally {
@@ -563,11 +512,11 @@ const NewRequestScreen = ({ navigation }: any) => {
     }
   };
 
-  // Handle map press to select location
-  const handleMapPress = (event: any) => {
-    const { latitude, longitude } = event.nativeEvent.coordinate;
-    const newLocation = { latitude, longitude };
+  // Handle map press to select location (Leaflet sends lat, lng)
+  const handleMapPress = (lat: number, lng: number) => {
+    const newLocation = { latitude: lat, longitude: lng };
     setSelectedLocation(newLocation);
+    setMapRegion((prev) => ({ ...prev, latitude: lat, longitude: lng }));
 
     // Reverse geocode to get address
     if (Location && Location.reverseGeocodeAsync) {
@@ -615,28 +564,13 @@ const NewRequestScreen = ({ navigation }: any) => {
         </TouchableOpacity>
       </View>
       <View style={styles.mapContainer}>
-        <MapView
-          ref={mapRef}
+        <LeafletMap
+          center={{ lat: mapRegion.latitude, lng: mapRegion.longitude }}
+          zoom={14}
+          markers={selectedLocation ? [{ id: 'selected', lat: selectedLocation.latitude, lng: selectedLocation.longitude, label: locationText || 'Selected Location' }] : []}
+          onMapPress={handleMapPress}
           style={styles.map}
-          provider={PROVIDER_DEFAULT}
-          initialRegion={mapRegion}
-          onPress={handleMapPress}
-          showsUserLocation={false}
-          showsMyLocationButton={false}
-          mapType="standard"
-        >
-          {selectedLocation && (
-            <Marker
-              coordinate={selectedLocation}
-              title="Selected Location"
-              description={locationText || "Tap on map to select location"}
-            >
-              <View style={styles.markerContainer}>
-                <Icon name="map-marker" size={40} color={COLORS.primaryGreen} />
-              </View>
-            </Marker>
-          )}
-        </MapView>
+        />
         <View style={styles.mapOverlay}>
           <Text style={styles.mapOverlayText}>Tap on map to select location</Text>
         </View>
@@ -870,7 +804,7 @@ const NewRequestScreen = ({ navigation }: any) => {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="dark-content" />
 
       <View style={styles.header}>
@@ -896,6 +830,7 @@ const NewRequestScreen = ({ navigation }: any) => {
       </ScrollView>
 
       {renderDateTimePicker()}
+      <BottomNav />
     </SafeAreaView>
   );
 };

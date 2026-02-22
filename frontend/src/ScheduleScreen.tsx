@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, ScrollView, RefreshControl } from 'react-native';
+import React, { useState, useEffect, useMemo } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, ScrollView, RefreshControl, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { Calendar } from 'react-native-calendars';
 import { useErrorHandler } from './hooks/useErrorHandler';
 import { api } from './api/client';
 import { useAuth } from './context/AuthContext';
+import BottomNav from './BottomNav';
 
 const THEME = {
   primary: "#059669",
@@ -33,9 +35,57 @@ export default function ScheduleScreen({ navigation, route }: any) {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'video-calls' | 'bookings'>('video-calls');
   const [startedVideoCalls, setStartedVideoCalls] = useState<Set<string>>(new Set());
+  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [calendarVisible, setCalendarVisible] = useState(false);
+  const [dateRange, setDateRange] = useState<'date' | 'week' | 'all'>('date');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'confirmed' | 'in_progress' | 'completed'>('all');
 
   // Hide video-calls tab if any video call has been started
   const shouldHideVideoCallsTab = startedVideoCalls.size > 0;
+
+  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const weekStartEnd = useMemo(() => {
+    const d = new Date(selectedDate + 'T12:00:00Z');
+    const day = d.getUTCDay();
+    const start = new Date(d);
+    start.setUTCDate(d.getUTCDate() - day);
+    const end = new Date(start);
+    end.setUTCDate(start.getUTCDate() + 6);
+    return {
+      startStr: start.toISOString().split('T')[0],
+      endStr: end.toISOString().split('T')[0],
+    };
+  }, [selectedDate]);
+
+  const statusMatches = (status: string) => {
+    const s = (status || '').toLowerCase();
+    if (statusFilter === 'pending') return s === 'requested' || s === 'pending';
+    if (statusFilter === 'confirmed') return s === 'accepted' || s === 'confirmed';
+    if (statusFilter === 'in_progress') return s === 'in_progress';
+    if (statusFilter === 'completed') return s === 'completed';
+    return true;
+  };
+
+  const inDateRange = (d: string | null) => {
+    if (!d) return dateRange === 'date' && selectedDate === todayStr;
+    if (dateRange === 'all') return true;
+    if (dateRange === 'week') return d >= weekStartEnd.startStr && d <= weekStartEnd.endStr;
+    return d === selectedDate;
+  };
+
+  const filteredVideoCalls = useMemo(() => {
+    return videoCalls.filter((item) => {
+      const d = item.scheduled_time ? item.scheduled_time.split('T')[0] : null;
+      return statusMatches(item.status) && inDateRange(d);
+    });
+  }, [videoCalls, statusFilter, dateRange, selectedDate, todayStr, weekStartEnd]);
+
+  const filteredBookings = useMemo(() => {
+    return bookings.filter((item) => {
+      const d = item.scheduled_date ? item.scheduled_date.split('T')[0] : null;
+      return statusMatches(item.status) && inDateRange(d);
+    });
+  }, [bookings, statusFilter, dateRange, selectedDate, todayStr, weekStartEnd]);
 
   const fetchData = async () => {
     try {
@@ -327,7 +377,7 @@ export default function ScheduleScreen({ navigation, route }: any) {
 
     // If video-calls tab is hidden, default to bookings
     const currentTab = shouldHideVideoCallsTab ? 'bookings' : activeTab;
-    const data = currentTab === 'video-calls' ? videoCalls : bookings;
+    const data = currentTab === 'video-calls' ? filteredVideoCalls : filteredBookings;
     const renderItem = currentTab === 'video-calls' ? renderVideoCallItem : renderBookingItem;
 
     if (data.length === 0) {
@@ -335,7 +385,7 @@ export default function ScheduleScreen({ navigation, route }: any) {
         <View style={styles.centerContainer}>
           <Icon name={currentTab === 'video-calls' ? 'video-off' : 'calendar-blank'} size={48} color={THEME.subText} />
           <Text style={styles.emptyText}>
-            No {currentTab === 'video-calls' ? 'video calls' : 'bookings'} scheduled
+            No {currentTab === 'video-calls' ? 'video calls' : 'bookings'} match the filters
           </Text>
         </View>
       );
@@ -354,16 +404,19 @@ export default function ScheduleScreen({ navigation, route }: any) {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Icon name="arrow-left" size={24} color="#000" />
-        </TouchableOpacity>
-        <Text style={styles.title}>My Schedule</Text>
-        <View style={{ width: 24 }} />
-      </View>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <View style={styles.contentWrap}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+            <Icon name="arrow-left" size={24} color="#000" />
+          </TouchableOpacity>
+          <Text style={styles.title}>My Schedule</Text>
+          <TouchableOpacity style={styles.calendarBtn} onPress={() => setCalendarVisible(true)}>
+            <Icon name="calendar" size={22} color={THEME.primary} />
+          </TouchableOpacity>
+        </View>
 
-      {error && (
+        {error && (
         <View style={styles.errorBanner}>
           <Icon name="alert-circle" size={20} color="#fff" />
           <Text style={styles.errorText} numberOfLines={2}>
@@ -383,7 +436,7 @@ export default function ScheduleScreen({ navigation, route }: any) {
           >
             <Icon name="video" size={18} color={activeTab === 'video-calls' ? '#fff' : THEME.subText} />
             <Text style={[styles.tabText, activeTab === 'video-calls' && styles.activeTabText]}>
-              Video Calls ({videoCalls.length})
+              Video Calls ({filteredVideoCalls.length})
             </Text>
           </TouchableOpacity>
         )}
@@ -392,19 +445,87 @@ export default function ScheduleScreen({ navigation, route }: any) {
           onPress={() => setActiveTab('bookings')}
         >
           <Icon name="calendar" size={18} color={activeTab === 'bookings' ? '#fff' : THEME.subText} />
-          <Text style={[styles.tabText, activeTab === 'bookings' && styles.activeTabText]}>
-            Bookings ({bookings.length})
-          </Text>
+            <Text style={[styles.tabText, activeTab === 'bookings' && styles.activeTabText]}>
+              Bookings ({filteredBookings.length})
+            </Text>
         </TouchableOpacity>
       </View>
 
-      {renderContent()}
+      <View style={styles.filterSection}>
+        <Text style={styles.filterLabel}>Date</Text>
+        <View style={styles.filterRow}>
+          {(['date', 'week', 'all'] as const).map((range) => (
+            <TouchableOpacity
+              key={range}
+              style={[styles.filterChip, dateRange === range && styles.filterChipActive]}
+              onPress={() => setDateRange(range)}
+            >
+              <Text style={[styles.filterChipText, dateRange === range && styles.filterChipTextActive]}>
+                {range === 'date' ? (selectedDate === todayStr ? 'Today' : 'Selected') : range === 'week' ? 'This week' : 'All'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.filterSection}>
+        <Text style={styles.filterLabel}>Status</Text>
+        <View style={styles.filterRow}>
+          {(['all', 'pending', 'confirmed', 'in_progress', 'completed'] as const).map((status) => (
+            <TouchableOpacity
+              key={status}
+              style={[styles.filterChip, statusFilter === status && styles.filterChipActive]}
+              onPress={() => setStatusFilter(status)}
+            >
+              <Text style={[styles.filterChipText, statusFilter === status && styles.filterChipTextActive]}>
+                {status === 'all' ? 'All' : status === 'pending' ? 'Pending' : status === 'confirmed' ? 'Confirmed' : status === 'in_progress' ? 'In progress' : 'Completed'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
+        <View style={styles.listWrap}>
+          {renderContent()}
+        </View>
+      </View>
+
+      <BottomNav />
+
+      <Modal visible={calendarVisible} animationType="slide">
+        <SafeAreaView style={{ flex: 1 }}>
+          <View style={styles.calendarHeader}>
+            <Text style={styles.calendarTitle}>Select Date</Text>
+            <TouchableOpacity onPress={() => setCalendarVisible(false)}>
+              <Icon name="close" size={26} color="#000" />
+            </TouchableOpacity>
+          </View>
+          <Calendar
+            markedDates={(() => {
+              const marks: Record<string, any> = {};
+              [...videoCalls, ...bookings].forEach((item) => {
+                const d = item.scheduled_time?.split('T')[0] || item.scheduled_date?.split('T')[0];
+                if (d) marks[d] = { marked: true, dotColor: THEME.primary };
+              });
+              marks[selectedDate] = { ...(marks[selectedDate] || {}), selected: true, selectedColor: THEME.primary };
+              return marks;
+            })()}
+            onDayPress={(day) => {
+              setSelectedDate(day.dateString);
+              setCalendarVisible(false);
+            }}
+            theme={{ todayTextColor: THEME.primary, arrowColor: THEME.primary }}
+          />
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: THEME.bg },
+  contentWrap: { flex: 1 },
+  listWrap: { flex: 1, minHeight: 0 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -415,6 +536,29 @@ const styles = StyleSheet.create({
   },
   backBtn: { padding: 4 },
   title: { fontSize: 18, fontWeight: '700', color: THEME.text },
+  calendarBtn: { padding: 8, backgroundColor: '#ECFDF5', borderRadius: 10 },
+  filterSection: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  filterLabel: { fontSize: 12, fontWeight: '600', color: THEME.subText, marginBottom: 6 },
+  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#F3F4F6',
+  },
+  filterChipActive: { backgroundColor: THEME.primary },
+  filterChipText: { fontSize: 14, fontWeight: '600', color: THEME.subText },
+  filterChipTextActive: { color: '#fff' },
+  calendarHeader: { flexDirection: 'row', justifyContent: 'space-between', padding: 20 },
+  calendarTitle: { fontSize: 18, fontWeight: '700' },
   tabsContainer: {
     flexDirection: 'row',
     paddingHorizontal: 16,

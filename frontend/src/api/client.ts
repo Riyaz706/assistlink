@@ -255,6 +255,16 @@ async function request<T>(
         // ignore JSON parse error, keep text
       }
 
+      // Show a short message instead of raw backend DB connection errors
+      if (errorMessage && (
+        errorMessage.includes("Database connection failed") ||
+        errorMessage.includes("database pool") ||
+        errorMessage.includes("Network is unreachable") ||
+        (errorMessage.includes("db.") && errorMessage.includes("supabase.co") && errorMessage.includes("5432"))
+      )) {
+        errorMessage = "Service is temporarily unavailable. Please try again in a moment.";
+      }
+
       // Create enhanced error object
       const error: any = new Error(errorMessage);
       error.statusCode = res.status;
@@ -541,6 +551,10 @@ export const api = {
     return request(`/api/caregivers${query}`);
   },
 
+  /** Get a single caregiver's profile by ID (e.g. for detail view when selecting a caregiver). */
+  getCaregiver: (caregiverId: string) =>
+    request<{ id: string; full_name?: string; profile_photo_url?: string; caregiver_profile?: any }>(`/api/caregivers/${caregiverId}`),
+
   /** Busy slots for a caregiver in a date range (accepted/confirmed/in_progress). Use before booking to show free vs busy. */
   getCaregiverBusySlots: (caregiverId: string, fromIso: string, toIso: string) =>
     request<{ start: string; end: string }[]>(`/api/caregivers/${caregiverId}/busy-slots?from_date=${encodeURIComponent(fromIso)}&to_date=${encodeURIComponent(toIso)}`),
@@ -590,7 +604,7 @@ export const api = {
     }),
 
   getVideoCallRequest: (videoCallId: string) =>
-    request(`/api/bookings/video-call/${videoCallId}`),
+    request(`/api/bookings/video-call/${videoCallId}`, { method: "GET" }),
 
   completeVideoCall: (bookingId: string) =>
     request(`/api/bookings/video-call/${bookingId}/complete`, {
@@ -699,7 +713,7 @@ export const api = {
     if (params.limit != null) qs.append("limit", String(params.limit));
     if (params.offset != null) qs.append("offset", String(params.offset));
     const query = qs.toString() ? `?${qs.toString()}` : "";
-    return request(`/api/dashboard/video-calls${query}`);
+    return request(`/api/dashboard/video-calls${query}`, { method: "GET" });
   },
 
   // Payments

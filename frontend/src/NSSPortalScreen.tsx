@@ -28,7 +28,8 @@ const NSSPortalScreen = ({ navigation }: any) => {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <View style={styles.contentWrap}>
       <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
       <View style={styles.header}>
         <TouchableOpacity
@@ -80,6 +81,7 @@ const NSSPortalScreen = ({ navigation }: any) => {
         </Text>
         <View style={{ height: 100 }} />
       </ScrollView>
+      </View>
 
       <BottomNav />
     </SafeAreaView>
@@ -88,6 +90,7 @@ const NSSPortalScreen = ({ navigation }: any) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
+  contentWrap: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -147,11 +147,13 @@ const ChatList = ({ navigation }: any) => {
   if (loading && !refreshing) {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Messages</Text>
-        </View>
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-          <ActivityIndicator size="large" color={THEME.primary} />
+        <View style={styles.contentWrap}>
+          <View style={styles.header}>
+            <Text style={styles.headerTitle}>Messages</Text>
+          </View>
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+            <ActivityIndicator size="large" color={THEME.primary} />
+          </View>
         </View>
         <BottomNav />
       </SafeAreaView>
@@ -160,6 +162,7 @@ const ChatList = ({ navigation }: any) => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <View style={styles.contentWrap}>
       <StatusBar barStyle="dark-content" backgroundColor={THEME.bg} />
 
       <View style={styles.header}>
@@ -189,6 +192,7 @@ const ChatList = ({ navigation }: any) => {
         </View>
       ) : (
         <FlatList
+          style={styles.listFill}
           data={filteredSessions}
           keyExtractor={item => item.id}
           renderItem={renderItem}
@@ -197,7 +201,7 @@ const ChatList = ({ navigation }: any) => {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         />
       )}
-
+      </View>
       <BottomNav />
     </SafeAreaView>
   );
@@ -205,6 +209,8 @@ const ChatList = ({ navigation }: any) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: THEME.bg },
+  contentWrap: { flex: 1 },
+  listFill: { flex: 1 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, marginTop: 10, marginBottom: 20 },
   headerTitle: { fontSize: 28, fontWeight: '700', color: THEME.text },
   editBtn: { padding: 8, borderRadius: 12, backgroundColor: THEME.primary, elevation: 4 },

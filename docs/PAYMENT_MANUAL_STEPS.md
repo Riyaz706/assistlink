@@ -106,7 +106,7 @@ Edit `frontend/.env`:
   ```env
   EXPO_PUBLIC_API_BASE_URL=http://192.168.1.9:8000
   ```
-- **Hosted backend:** Use production URL (e.g. `https://assistlink-backend.onrender.com`). See [NETWORK_RULES.md](NETWORK_RULES.md). Do not use localhost for the app.
+- **Hosted backend:** Use production URL (e.g. `https://assistlink-backend-1qjd.onrender.com`). See [NETWORK_RULES.md](NETWORK_RULES.md). Do not use localhost for the app.
 
 ### 3.3 Install dependencies (if not done)
 

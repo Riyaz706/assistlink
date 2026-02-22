@@ -99,7 +99,7 @@ Then press `w` (web), `a` (Android), or `i` (iOS), or scan the QR code with Expo
 
 | Goal              | Backend                    | `frontend/.env`                                              |
 |-------------------|----------------------------|--------------------------------------------------------------|
-| Use hosted API    | Don’t start backend        | `EXPO_PUBLIC_API_BASE_URL=https://assistlink-backend.onrender.com` (default) |
+| Use hosted API    | Don’t start backend        | `EXPO_PUBLIC_API_BASE_URL=https://assistlink-backend-1qjd.onrender.com` (default) |
 | Use local API     | Run uvicorn (step 2 above) | `EXPO_PUBLIC_API_BASE_URL=http://YOUR_LAN_IP:8000`          |
 
 **Check connection:** In the app, open **Settings → Connection** and use **Test connection** to confirm the backend is reachable.

@@ -145,6 +145,7 @@ const CareRecipientDashboard = () => {
   const [caretakerPhone, setCaretakerPhone] = useState("");
   const [currentBookings, setCurrentBookings] = useState<any[]>([]);
   const [loadingBookings, setLoadingBookings] = useState(false);
+  const [unratedBooking, setUnratedBooking] = useState<any>(null);
   const [menuVisible, setMenuVisible] = useState(false);
   const scaleValue = useRef(new Animated.Value(0)).current;
 
@@ -193,10 +194,24 @@ const CareRecipientDashboard = () => {
       }, []);
 
       setCurrentBookings(uniqueBookings);
+
+      // Find a completed booking that hasn't been rated (for "Rate your caregiver" prompt)
+      try {
+        const completed = await api.getDashboardBookings({ status: 'completed', limit: 5 });
+        const list = (completed as any[]) || [];
+        let found: any = null;
+        for (const b of list) {
+          const review = await api.getBookingReview(b.id).catch(() => null);
+          if (!review) {
+            found = b;
+            break;
+          }
+        }
+        setUnratedBooking(found);
+      } catch {
+        setUnratedBooking(null);
+      }
     } catch (e: any) {
-      // For dashboard loading, we might want silent error or a toast, 
-      // but for now let's just log it or use handleError without alert if preferred.
-      // Using handleError so it handles auth errors (redirect to login) if any.
       handleError(e, 'load-bookings');
     } finally {
       setLoadingBookings(false);
@@ -251,7 +266,17 @@ const CareRecipientDashboard = () => {
     try {
       await api.completeBooking(bookingId);
       await loadCurrentBookings();
-      Alert.alert("Success", "Booking marked as completed! The caregiver is now available for other requests.");
+      Alert.alert(
+        "Visit completed",
+        "Would you like to rate your caregiver? Your feedback helps others choose the best care.",
+        [
+          { text: "Later" },
+          {
+            text: "Rate now",
+            onPress: () => (navigation as any).navigate('BookingDetailScreen', { bookingId }),
+          },
+        ]
+      );
     } catch (e: any) {
       handleError(e, 'mark-completed');
     }
@@ -395,7 +420,8 @@ const CareRecipientDashboard = () => {
         </View>
       </Modal>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+      <View style={styles.contentWrap}>
+        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
 
         {/* HEADER - Hamburger (PRD) + Date/Title + Notifications */}
         <View style={styles.headerRow}>
@@ -518,6 +544,25 @@ const CareRecipientDashboard = () => {
         {/* SOS SWIPE BUTTON */}
         <SosSwipeButton onSwipeSuccess={handleEmergencySwipe} />
 
+        {/* RATE YOUR CAREGIVER PROMPT */}
+        {unratedBooking && (
+          <TouchableOpacity
+            style={styles.rateCard}
+            onPress={() => (navigation as any).navigate('BookingDetailScreen', { bookingId: unratedBooking.id })}
+            activeOpacity={0.8}
+          >
+            <View style={styles.rateCardLeft}>
+              <Icon name="star" size={28} color="#FFD700" />
+              <View style={{ marginLeft: 12 }}>
+                <Text style={styles.rateCardTitle}>Rate your caregiver</Text>
+                <Text style={styles.rateCardDesc}>
+                  How was your visit with {unratedBooking.caregiver?.full_name || 'your caregiver'}?
+                </Text>
+              </View>
+            </View>
+            <Text style={styles.rateCardBtn}>Rate now</Text>
+          </TouchableOpacity>
+        )}
 
         {/* STATUS SECTION HEADER */}
         <View style={styles.sectionHeader}>
@@ -599,15 +644,17 @@ const CareRecipientDashboard = () => {
                   </View>
 
                   <View style={styles.actionRow}>
-                    <TouchableOpacity
-                      style={styles.completeBtn}
-                      onPress={() => handleMarkCompleted(booking.id)}
-                      accessibilityLabel="Mark booking as completed"
-                      accessibilityRole="button"
-                    >
-                      <Icon name="check-circle" size={16} color="#fff" style={{ marginRight: 6 }} />
-                      <Text style={styles.completeBtnText}>Mark as Completed</Text>
-                    </TouchableOpacity>
+                    {booking.status === 'in_progress' && (
+                      <TouchableOpacity
+                        style={styles.completeBtn}
+                        onPress={() => handleMarkCompleted(booking.id)}
+                        accessibilityLabel="Mark booking as completed"
+                        accessibilityRole="button"
+                      >
+                        <Icon name="check-circle" size={16} color="#fff" style={{ marginRight: 6 }} />
+                        <Text style={styles.completeBtnText}>Mark as Completed</Text>
+                      </TouchableOpacity>
+                    )}
                     <TouchableOpacity
                       style={styles.trackBtn}
                       onPress={() => {
@@ -647,7 +694,8 @@ const CareRecipientDashboard = () => {
           </View>
         )}
 
-      </ScrollView>
+        </ScrollView>
+      </View>
 
       {/* BOTTOM NAV */}
       <BottomNav />
@@ -660,6 +708,8 @@ export default CareRecipientDashboard;
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F6FAF5" },
+  contentWrap: { flex: 1 },
+  scrollView: { flex: 1 },
   scrollContent: { paddingBottom: 100 },
 
   // --- SWIPE BUTTON STYLES ---
@@ -771,6 +821,23 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 18, fontWeight: "700", color: '#1A1A1A' },
   statusSummaryWrap: { paddingHorizontal: 16, marginBottom: 12 },
   statusSummaryText: { fontSize: 14, color: '#6B7280', fontWeight: '500' },
+
+  rateCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: 16,
+    padding: 16,
+    marginHorizontal: 16,
+    marginBottom: 20,
+  },
+  rateCardLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  rateCardTitle: { fontSize: 16, fontWeight: '700', color: '#1A1A1A' },
+  rateCardDesc: { fontSize: 13, color: '#6B7280', marginTop: 2 },
+  rateCardBtn: { fontSize: 15, fontWeight: '700', color: GREEN, marginLeft: 8 },
 
   visitCard: {
     backgroundColor: "#fff", borderRadius: 18, padding: 12,

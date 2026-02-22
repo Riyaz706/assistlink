@@ -57,7 +57,7 @@ async def create_review(
         print(f"[WARN] reviews: reviews table error (likely missing): {err2}", file=sys.stderr, flush=True)
         return {"status": "ok", "message": "Feature disabled in MVP"}
     if existing:
-        raise ConflictError("You have already reviewed this booking")
+        raise ConflictError("You have already submitted a review for this booking. You can only rate once.")
 
     # Insert review
     inserted, err3 = _safe_table_call(

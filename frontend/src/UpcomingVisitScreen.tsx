@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, StatusBar, Dimensions, Image,
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import BottomNav from './BottomNav';
 import { api } from './api/client';
 import { useErrorHandler, ErrorDetails } from './hooks/useErrorHandler';
 
@@ -230,6 +231,7 @@ const UpcomingVisitScreen = () => {
           </ScrollView>
         </>
       )}
+      <BottomNav />
     </View>
   );
 };

@@ -99,7 +99,7 @@ export default function ProfileScreen({ navigation }: any) {
   // Restoring original component logic but inside the function scope.
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <StatusBar barStyle="dark-content" backgroundColor={THEME.bg} />
 
       {/* --- HEADER --- */}

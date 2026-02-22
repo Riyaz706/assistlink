@@ -208,9 +208,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           console.log("AuthContext: User profile fetched:", (me as any)?.email || (me as any)?.full_name || "Unknown");
           setUser(me as any);
         } catch (meError: any) {
-          console.error("AuthContext: Failed to fetch user profile after login:", meError);
-          setUser({ email, id: res.user?.id || null, role: (res.user as any)?.role || "care_recipient" });
-          throw new Error("Login successful but failed to load profile. Please try again.");
+          console.warn("AuthContext: Failed to fetch /me after login, using login response user:", meError);
+          if (res.user && typeof res.user === "object") {
+            setUser(res.user as any);
+          } else {
+            setUser({ email, id: res.user?.id || null, role: (res.user as any)?.role || "care_recipient" });
+          }
         }
         return;
     } catch (error: any) {

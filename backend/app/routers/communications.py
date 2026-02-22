@@ -2,12 +2,13 @@
 Communications router — Video room + support/feedback endpoints.
 Video calls use WebRTC with Supabase Realtime signaling; this endpoint returns room info for clients that request it.
 """
+import sys
+from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel
 from app.dependencies import get_current_user
 from app.database import supabase_admin
 from app.error_handler import AuthorizationError, NotFoundError
-import sys
 
 router = APIRouter(tags=["Communications"])
 

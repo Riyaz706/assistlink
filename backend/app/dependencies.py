@@ -1,3 +1,4 @@
+import sys
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from supabase import Client
@@ -20,7 +21,6 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ) -> dict:
     """Get current authenticated user from JWT token"""
-    import sys
     try:
         sys.stderr.write("[AUTH] get_current_user called\n")
         sys.stderr.flush()

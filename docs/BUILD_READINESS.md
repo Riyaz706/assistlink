@@ -12,7 +12,7 @@
 |------|--------|
 | **Expo app.config.js** | ✅ App name, version, bundle IDs (`com.assistlink.app`), icon/splash paths, permissions, scheme |
 | **EAS Build (eas.json)** | ✅ `preview` and `production` profiles; APK for Android; env vars set for EAS cloud builds |
-| **API base URL** | ✅ Default `https://assistlink-backend.onrender.com` in app.config and eas.json |
+| **API base URL** | ✅ Default `https://assistlink-backend-1qjd.onrender.com` in app.config and eas.json |
 | **Google OAuth / Maps** | ✅ Client IDs and Maps key in eas.json (preview/production); app uses `expo-constants` extra as fallback |
 | **iOS / Android config** | ✅ Bundle ID, permissions (camera, mic), adaptive icon, Google Maps config |
 | **Backend** | ✅ FastAPI app; deploy separately (e.g. Render); frontend points to it via `EXPO_PUBLIC_API_BASE_URL` |
@@ -36,7 +36,7 @@ If any of these are missing, the build can fail. Add them or adjust paths in `ap
 
 For the built app to work:
 
-- Backend must be deployed and publicly reachable (e.g. `https://assistlink-backend.onrender.com`).
+- Backend must be deployed and publicly reachable (e.g. `https://assistlink-backend-1qjd.onrender.com`).
 - If you use a different URL, set `EXPO_PUBLIC_API_BASE_URL` in your build env (see below).
 
 ---
@@ -87,7 +87,7 @@ If you don’t use the values in `eas.json`, you can set:
 
 | Variable | Purpose | Default in project |
 |----------|--------|---------------------|
-| `EXPO_PUBLIC_API_BASE_URL` | Backend API URL | `https://assistlink-backend.onrender.com` |
+| `EXPO_PUBLIC_API_BASE_URL` | Backend API URL | `https://assistlink-backend-1qjd.onrender.com` |
 | `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` | Google OAuth (web) | Set in eas.json |
 | `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` | Google OAuth (iOS) | Set in eas.json |
 | `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID` | Google OAuth (Android) | Set in eas.json |

@@ -4,6 +4,8 @@ This guide provides step-by-step instructions to deploy the AssistLink applicati
 - **Backend**: Deployed to [Render](https://render.com) using `render.yaml`.
 - **Frontend (Web)**: Deployed to [Firebase Hosting](https://firebase.google.com) using the Expo web build.
 
+**Before deploying:** Complete **[PRE_DEPLOYMENT_CHECKLIST.md](PRE_DEPLOYMENT_CHECKLIST.md)** so there are no localhost/local IP, database, or CORS issues in production.
+
 ---
 
 ## 📋 Prerequisites
@@ -35,7 +37,7 @@ Ensure `render.yaml` in the root directory specifies:
 ### Step 1.3: Deploy
 - Click **Apply** or **Create Web Service**.
 - Monitor the deployment logs.
-- Once finished, note your backend URL (e.g., `https://assistlink-backend.onrender.com`).
+- Once finished, note your backend URL (e.g., `https://assistlink-backend-1qjd.onrender.com`).
 
 ---
 
@@ -48,7 +50,7 @@ The frontend is an Expo app that will be exported as a static web app.
 2.  Ensure `EXPO_PUBLIC_API_BASE_URL` points to your **newly deployed Render Backend URL**.
     ```javascript
     // app.config.js
-    const apiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || 'https://your-backend-url.onrender.com';
+    const apiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || 'https://assistlink-backend-1qjd.onrender.com';
     ```
 
 ### Step 2.2: Build the Web App

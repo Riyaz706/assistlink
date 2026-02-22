@@ -98,7 +98,7 @@ ip -4 addr show wlan0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}'
 1. Open the file **`frontend/.env`** in your project (same folder as `package.json`).
 2. Find the line that sets the API URL. It might look like:
    ```env
-   EXPO_PUBLIC_API_BASE_URL=https://assistlink-backend.onrender.com
+   EXPO_PUBLIC_API_BASE_URL=https://assistlink-backend-1qjd.onrender.com
    ```
 3. Change it to use your LAN IP and port `8000` (no trailing slash):
    ```env

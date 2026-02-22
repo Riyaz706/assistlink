@@ -3,7 +3,7 @@
 ## Prerequisites
 ✅ EAS CLI installed (`/opt/homebrew/bin/eas`)  
 ✅ `eas.json` configured with production settings  
-✅ Backend URL: `https://assistlink-nd65.onrender.com`  
+✅ Backend URL: `https://assistlink-backend-1qjd.onrender.com`  
 ✅ Google OAuth Client IDs configured
 
 ## Quick Build (Recommended)
@@ -73,7 +73,7 @@ Once complete:
 Both profiles include:
 ```json
 {
-  "EXPO_PUBLIC_API_BASE_URL": "https://assistlink-nd65.onrender.com",
+  "EXPO_PUBLIC_API_BASE_URL": "https://assistlink-backend-1qjd.onrender.com",
   "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "993827486634-...",
   "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "993827486634-...",
   "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "993827486634-..."

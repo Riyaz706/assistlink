@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
+import BottomNav from './BottomNav';
 
 const THEME = {
   bg: "#F5F7F5",
@@ -29,6 +30,7 @@ const ChatDetailScreen = ({ navigation }: any) => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <View style={styles.contentWrap}>
       <StatusBar barStyle="dark-content" backgroundColor={THEME.white} />
 
       {/* --- HEADER --- */}
@@ -167,6 +169,8 @@ const ChatDetailScreen = ({ navigation }: any) => {
           </View>
         </View>
       </KeyboardAvoidingView>
+      </View>
+      <BottomNav />
     </SafeAreaView>
   );
 };
@@ -176,6 +180,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: THEME.bg,
   },
+  contentWrap: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

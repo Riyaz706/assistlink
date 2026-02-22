@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
-import { Platform, Vibration } from 'react-native';
+import { Platform, Vibration, Alert } from 'react-native';
 import { api } from '../api/client';
+import * as RootNavigation from '../navigation/RootNavigation';
 
 // Configure notification behavior: every notification shows with sound and vibration
 Notifications.setNotificationHandler({
@@ -47,7 +48,7 @@ export function useNotifications(navigation?: any) {
             }
         });
 
-        // Listen for notifications while app is in foreground (sound + vibration for every notification)
+        // Listen for notifications while app is in foreground (sound + vibration; emergency = popup alert)
         notificationListener.current = Notifications.addNotificationReceivedListener(notification => {
             console.log('📬 Notification received:', notification);
             setNotification(notification);
@@ -56,6 +57,34 @@ export function useNotifications(navigation?: any) {
             const isEmergency = data?.notification_type === 'emergency' || data?.action === 'view_emergency';
             if (isEmergency) {
                 Vibration.vibrate([0, 500, 200, 500, 200, 500]);
+                const title = notification.request.content.title || 'Emergency Alert';
+                const body = notification.request.content.body || 'A care recipient needs assistance.';
+                const emergencyId = typeof data?.emergency_id === 'string' ? data.emergency_id : (data?.emergency_id as any)?.toString?.();
+                const location = data?.location;
+                Alert.alert(
+                    title,
+                    body,
+                    [
+                        {
+                            text: 'View',
+                            onPress: () => {
+                                if (emergencyId) {
+                                    RootNavigation.navigate('EmergencyScreen', {
+                                        emergency_id: emergencyId,
+                                        notification: {
+                                            data: {
+                                                emergency_id: emergencyId,
+                                                location: typeof location === 'string' ? (() => { try { return JSON.parse(location); } catch { return undefined; } })() : location,
+                                            },
+                                        },
+                                    });
+                                }
+                            },
+                        },
+                        { text: 'Dismiss' },
+                    ],
+                    { cancelable: false }
+                );
             } else {
                 Vibration.vibrate([0, 100, 50, 100]);
             }
@@ -80,11 +109,12 @@ export function useNotifications(navigation?: any) {
     return { expoPushToken, notification };
 }
 
+let fcmWarningLogged = false;
+
 async function registerForPushNotificationsAsync() {
     let token;
 
     if (!Device.isDevice) {
-        console.log('⚠️ Must use physical device for Push Notifications');
         return null;
     }
 
@@ -97,7 +127,6 @@ async function registerForPushNotificationsAsync() {
     }
 
     if (finalStatus !== 'granted') {
-        console.log('❌ Failed to get push token for push notification!');
         return null;
     }
 
@@ -106,11 +135,19 @@ async function registerForPushNotificationsAsync() {
         token = pushTokenData.data;
         console.log('✅ Expo Push Token:', token);
     } catch (error: any) {
-        console.log('⚠️ Failed to get push token. This is expected if you are not using a physical device or if you have not set up EAS Project ID.');
-        if (error.message.includes('projectId')) {
-            console.log('👉 To fix this, run "npx eas init" to create an EAS project, or test on a physical device with Expo Go logged in.');
-        } else {
-            console.error('Error getting push token:', error);
+        const msg = error?.message ?? String(error);
+        const isFirebase = /Firebase|FirebaseApp|not initialized/i.test(msg) || msg.includes('fcm-credentials');
+        const isProjectId = /projectId/i.test(msg);
+        if (isFirebase && !fcmWarningLogged) {
+            fcmWarningLogged = true;
+            console.warn(
+                'Push (FCM) not configured — background push disabled. In-app notifications work. See https://docs.expo.dev/push-notifications/fcm-credentials/'
+            );
+        } else if (isProjectId && !fcmWarningLogged) {
+            fcmWarningLogged = true;
+            console.warn('Push token unavailable (EAS Project ID). In-app notifications still work.');
+        } else if (!isFirebase && !isProjectId) {
+            console.warn('Push token unavailable:', msg);
         }
         return null;
     }
@@ -123,7 +160,7 @@ async function registerForPushNotificationsAsync() {
             vibrationPattern: [0, 250, 250, 250],
             lightColor: '#059669',
             sound: 'default',
-            enableVibration: true,
+            enableVibrate: true,
         });
         await Notifications.setNotificationChannelAsync('emergency', {
             name: 'Emergency Alerts',
@@ -131,7 +168,7 @@ async function registerForPushNotificationsAsync() {
             vibrationPattern: [0, 500, 200, 500, 200, 500],
             lightColor: '#DC2626',
             sound: 'default',
-            enableVibration: true,
+            enableVibrate: true,
         });
     }
 
@@ -175,9 +212,11 @@ function handleNotificationAction(data: any, navigation?: any) {
             break;
 
         case 'view_emergency':
-            if (data.emergency_id || data.care_recipient_id) {
+            // Only pass emergency_id (UUID of the emergency row). Do not use care_recipient_id as fallback or resolve will fail.
+            if (data.emergency_id) {
                 navigation.navigate('EmergencyScreen', {
-                    emergency_id: data.emergency_id || data.care_recipient_id,
+                    emergency_id: data.emergency_id,
+                    notification: { data: { emergency_id: data.emergency_id, location: data.location } },
                     care_recipient_id: data.care_recipient_id,
                     location: data.location
                 });

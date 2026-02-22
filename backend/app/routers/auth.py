@@ -110,10 +110,10 @@ async def login(request: Request, credentials: LoginRequest):
         if not access_token:
             raise AuthenticationError("Login failed: No access token received. Please try again.")
         
-        # Get user profile
+        # Get user profile (use admin client so RLS does not block; anon client may not have user context here)
         user_id = response.user.id if hasattr(response.user, 'id') else response.user.get('id') if isinstance(response.user, dict) else str(response.user)
         
-        user_profile_response = supabase.table("users").select("*").eq("id", user_id).execute()
+        user_profile_response = supabase_admin.table("users").select("*").eq("id", user_id).execute()
         
         user_profile = None
         if user_profile_response.data and len(user_profile_response.data) > 0:

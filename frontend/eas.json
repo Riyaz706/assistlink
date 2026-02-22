@@ -12,7 +12,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://assistlink-backend.onrender.com",
+        "EXPO_PUBLIC_API_BASE_URL": "https://assistlink-backend-1qjd.onrender.com",
         "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "993827486634-npog8gm3n22ht4dcmu3nfftp141g38hj.apps.googleusercontent.com",
         "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "993827486634-npog8gm3n22ht4dcmu3nfftp141g38hj.apps.googleusercontent.com",
         "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "993827486634-npog8gm3n22ht4dcmu3nfftp141g38hj.apps.googleusercontent.com",
@@ -24,7 +24,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://assistlink-backend.onrender.com",
+        "EXPO_PUBLIC_API_BASE_URL": "https://assistlink-backend-1qjd.onrender.com",
         "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "993827486634-npog8gm3n22ht4dcmu3nfftp141g38hj.apps.googleusercontent.com",
         "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "993827486634-npog8gm3n22ht4dcmu3nfftp141g38hj.apps.googleusercontent.com",
         "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "993827486634-npog8gm3n22ht4dcmu3nfftp141g38hj.apps.googleusercontent.com",

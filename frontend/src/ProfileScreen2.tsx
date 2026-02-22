@@ -14,11 +14,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import BottomNav from './BottomNav';
 import { useAuth } from './context/AuthContext';
 import { api } from './api/client';
 import { useFocusEffect } from '@react-navigation/native';
 
 import { useErrorHandler } from './hooks/useErrorHandler';
+import { accessibility as a11y } from './theme';
 
 // --- THEME COLORS ---
 const THEME = {
@@ -83,16 +85,19 @@ export default function ProfileScreen2({ navigation }: any) {
     }
   };
 
-  const SettingsItem = ({ icon, iconColor, label, rightElement, onPress, isLast }: any) => (
+  const SettingsItem = ({ icon, iconColor, label, rightElement, onPress, isLast, accessibilityHint }: any) => (
     <TouchableOpacity
       style={[styles.itemContainer, isLast && { borderBottomWidth: 0 }]}
       onPress={onPress}
       activeOpacity={0.7}
       disabled={!onPress}
+      accessibilityLabel={label}
+      accessibilityRole={onPress ? 'button' : undefined}
+      accessibilityHint={accessibilityHint}
     >
       <View style={styles.itemLeft}>
         <View style={styles.iconBox}>
-          <MaterialCommunityIcons name={icon} size={20} color={iconColor} />
+          <MaterialCommunityIcons name={icon} size={20} color={iconColor} accessibilityElementsHidden />
         </View>
         <Text style={styles.itemLabel}>{label}</Text>
       </View>
@@ -103,15 +108,28 @@ export default function ProfileScreen2({ navigation }: any) {
   );
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <View style={styles.contentWrap}>
       <StatusBar barStyle="dark-content" backgroundColor={THEME.bg} />
 
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={{ padding: 8, marginLeft: -8 }}>
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.backBtn}
+          accessibilityLabel="Go back"
+          accessibilityRole="button"
+          accessibilityHint="Returns to the previous screen"
+        >
           <MaterialCommunityIcons name="arrow-left" size={24} color={THEME.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Profile</Text>
-        <TouchableOpacity>
+        <Text style={styles.headerTitle} accessibilityRole="header">Profile</Text>
+        <TouchableOpacity
+          style={styles.helpBtn}
+          onPress={() => navigation.navigate('HelpSupport')}
+          accessibilityLabel="Help"
+          accessibilityRole="button"
+          accessibilityHint="Opens Help and Support"
+        >
           <Text style={styles.helpText}>Help</Text>
         </TouchableOpacity>
       </View>
@@ -119,20 +137,32 @@ export default function ProfileScreen2({ navigation }: any) {
       {/* ERROR BANNER */}
       {error && (
         <View style={styles.errorBanner}>
-          <MaterialCommunityIcons name="alert-circle" size={20} color={THEME.error} />
+          <MaterialCommunityIcons name="alert-circle" size={20} color={THEME.error} accessibilityElementsHidden />
           <Text style={styles.errorText}>{error.message}</Text>
-          <TouchableOpacity onPress={clearError}>
-            <MaterialCommunityIcons name="close" size={20} color={THEME.error} />
+          <TouchableOpacity
+            onPress={clearError}
+            style={styles.errorDismiss}
+            accessibilityLabel="Dismiss error"
+            accessibilityRole="button"
+          >
+            <MaterialCommunityIcons name="close" size={24} color={THEME.error} />
           </TouchableOpacity>
         </View>
       )}
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
 
         <View style={styles.profileSection}>
           <TouchableOpacity
             style={styles.avatarContainer}
             onPress={() => navigation.navigate('EditProfile')}
+            accessibilityLabel="Edit profile photo"
+            accessibilityRole="button"
+            accessibilityHint="Opens edit profile screen"
           >
             {(user as any)?.profile_photo_url ? (
               <Image source={{ uri: (user as any).profile_photo_url }} style={styles.avatar} />
@@ -152,7 +182,13 @@ export default function ProfileScreen2({ navigation }: any) {
             <Text style={styles.roleText}>Verified Caregiver</Text>
           </View>
 
-          <TouchableOpacity style={styles.editProfileBtn} onPress={() => navigation.navigate('EditProfile')}>
+          <TouchableOpacity
+            style={styles.editProfileBtn}
+            onPress={() => navigation.navigate('EditProfile')}
+            accessibilityLabel="Edit Profile"
+            accessibilityRole="button"
+            accessibilityHint="Opens edit profile screen"
+          >
             <Text style={styles.editProfileText}>Edit Profile</Text>
           </TouchableOpacity>
         </View>
@@ -246,6 +282,9 @@ export default function ProfileScreen2({ navigation }: any) {
         <View style={{ height: 80 }} />
 
       </ScrollView>
+      </View>
+
+      <BottomNav />
 
       {/* Qualifications Modal */}
       <Modal
@@ -302,12 +341,25 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: THEME.bg,
   },
+  contentWrap: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingVertical: 15,
+  },
+  backBtn: {
+    minWidth: a11y.minTouchTargetSize,
+    minHeight: a11y.minTouchTargetSize,
+    justifyContent: 'center',
+    marginLeft: -8,
+  },
+  helpBtn: {
+    minWidth: a11y.minTouchTargetSize,
+    minHeight: a11y.minTouchTargetSize,
+    justifyContent: 'center',
+    alignItems: 'flex-end',
   },
   headerTitle: {
     fontSize: 20,
@@ -417,6 +469,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    minHeight: a11y.minTouchTargetSize,
     paddingVertical: 16,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
@@ -567,5 +620,11 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 8,
     fontSize: 14,
+  },
+  errorDismiss: {
+    minWidth: a11y.minTouchTargetSize,
+    minHeight: a11y.minTouchTargetSize,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

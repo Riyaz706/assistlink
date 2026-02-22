@@ -10,11 +10,14 @@ import {
     KeyboardAvoidingView,
     Platform,
     ScrollView,
+    useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import BottomNav from './BottomNav';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { api } from './api/client';
 import { useErrorHandler, ErrorDetails } from './hooks/useErrorHandler';
+import { accessibility as a11y, spacing } from './theme';
 
 const THEME = {
     primary: '#059669',
@@ -29,23 +32,33 @@ const THEME = {
 const ErrorBanner = ({ error, onDismiss }: { error: ErrorDetails | null, onDismiss: () => void }) => {
     if (!error) return null;
     return (
-        <View style={styles.errorBanner}>
-            <MaterialCommunityIcons name="alert-circle" size={20} color="#FFF" />
+        <View style={styles.errorBanner} accessibilityLiveRegion="polite">
+            <MaterialCommunityIcons name="alert-circle" size={20} color="#FFF" accessibilityElementsHidden />
             <Text style={styles.errorText}>{error.message}</Text>
-            <TouchableOpacity onPress={onDismiss}>
-                <MaterialCommunityIcons name="close" size={20} color="#FFF" />
+            <TouchableOpacity
+                onPress={onDismiss}
+                style={styles.errorDismiss}
+                accessibilityLabel="Dismiss error"
+                accessibilityRole="button"
+                accessibilityHint="Removes the error message from the screen"
+            >
+                <MaterialCommunityIcons name="close" size={24} color="#FFF" />
             </TouchableOpacity>
         </View>
     );
 };
 
+const MAX_FORM_WIDTH = 440;
+
 export default function ChangePasswordScreen({ navigation }: any) {
+    const { width } = useWindowDimensions();
     const [currentPassword, setCurrentPassword] = useState('');
     const [newPassword, setNewPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
     const { handleError, error, clearError } = useErrorHandler();
+    const formMaxWidth = width > MAX_FORM_WIDTH ? MAX_FORM_WIDTH : undefined;
 
     const handleChangePassword = async () => {
         clearError();
@@ -82,22 +95,32 @@ export default function ChangePasswordScreen({ navigation }: any) {
     };
 
     return (
-        <SafeAreaView style={styles.container}>
+        <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
             <KeyboardAvoidingView
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                 style={{ flex: 1 }}
             >
                 <View style={styles.header}>
-                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+                    <TouchableOpacity
+                        onPress={() => navigation.goBack()}
+                        style={styles.backBtn}
+                        accessibilityLabel="Go back"
+                        accessibilityRole="button"
+                        accessibilityHint="Returns to the previous screen"
+                    >
                         <MaterialCommunityIcons name="arrow-left" size={24} color={THEME.text} />
                     </TouchableOpacity>
-                    <Text style={styles.headerTitle}>Change Password</Text>
-                    <View style={{ width: 40 }} />
+                    <Text style={styles.headerTitle} accessibilityRole="header">Change Password</Text>
+                    <View style={styles.headerSpacer} />
                 </View>
 
                 <ErrorBanner error={error} onDismiss={clearError} />
 
-                <ScrollView contentContainerStyle={styles.scrollContent}>
+                <ScrollView
+                    contentContainerStyle={[styles.scrollContent, formMaxWidth && { maxWidth: formMaxWidth, alignSelf: 'center' }]}
+                    keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator={false}
+                >
                     <View style={styles.iconContainer}>
                         <MaterialCommunityIcons name="lock-reset" size={64} color={THEME.primary} />
                     </View>
@@ -113,7 +136,7 @@ export default function ChangePasswordScreen({ navigation }: any) {
                     <View style={styles.form}>
                         <Text style={styles.label}>Current Password</Text>
                         <View style={styles.inputContainer}>
-                            <MaterialCommunityIcons name="lock-outline" size={20} color={THEME.subText} style={styles.inputIcon} />
+                            <MaterialCommunityIcons name="lock-outline" size={20} color={THEME.subText} style={styles.inputIcon} accessibilityElementsHidden />
                             <TextInput
                                 style={styles.input}
                                 placeholder="Enter current password"
@@ -124,11 +147,19 @@ export default function ChangePasswordScreen({ navigation }: any) {
                                     if (error) clearError();
                                 }}
                                 autoCapitalize="none"
+                                accessibilityLabel="Current password"
+                                accessibilityHint="Enter your current password. Optional if you signed in with Google."
                             />
-                            <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+                            <TouchableOpacity
+                                onPress={() => setShowPassword(!showPassword)}
+                                style={styles.visibilityToggle}
+                                accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                                accessibilityRole="button"
+                                accessibilityState={{ checked: showPassword }}
+                            >
                                 <MaterialCommunityIcons
                                     name={showPassword ? 'eye-off' : 'eye'}
-                                    size={20}
+                                    size={24}
                                     color={THEME.subText}
                                 />
                             </TouchableOpacity>
@@ -136,7 +167,7 @@ export default function ChangePasswordScreen({ navigation }: any) {
 
                         <Text style={styles.label}>New Password</Text>
                         <View style={styles.inputContainer}>
-                            <MaterialCommunityIcons name="lock-plus-outline" size={20} color={THEME.subText} style={styles.inputIcon} />
+                            <MaterialCommunityIcons name="lock-plus-outline" size={20} color={THEME.subText} style={styles.inputIcon} accessibilityElementsHidden />
                             <TextInput
                                 style={styles.input}
                                 placeholder="Enter new password"
@@ -147,12 +178,14 @@ export default function ChangePasswordScreen({ navigation }: any) {
                                     if (error) clearError();
                                 }}
                                 autoCapitalize="none"
+                                accessibilityLabel="New password"
+                                accessibilityHint="At least 6 characters"
                             />
                         </View>
 
                         <Text style={styles.label}>Confirm New Password</Text>
                         <View style={styles.inputContainer}>
-                            <MaterialCommunityIcons name="lock-check-outline" size={20} color={THEME.subText} style={styles.inputIcon} />
+                            <MaterialCommunityIcons name="lock-check-outline" size={20} color={THEME.subText} style={styles.inputIcon} accessibilityElementsHidden />
                             <TextInput
                                 style={styles.input}
                                 placeholder="Confirm new password"
@@ -163,6 +196,8 @@ export default function ChangePasswordScreen({ navigation }: any) {
                                     if (error) clearError();
                                 }}
                                 autoCapitalize="none"
+                                accessibilityLabel="Confirm new password"
+                                accessibilityHint="Re-enter your new password"
                             />
                         </View>
 
@@ -170,6 +205,10 @@ export default function ChangePasswordScreen({ navigation }: any) {
                             style={[styles.submitBtn, loading && styles.submitBtnDisabled]}
                             onPress={handleChangePassword}
                             disabled={loading}
+                            accessibilityLabel="Update password"
+                            accessibilityRole="button"
+                            accessibilityHint="Saves your new password"
+                            accessibilityState={{ disabled: loading }}
                         >
                             {loading ? (
                                 <ActivityIndicator color="#FFF" />
@@ -180,6 +219,7 @@ export default function ChangePasswordScreen({ navigation }: any) {
                     </View>
                 </ScrollView>
             </KeyboardAvoidingView>
+            <BottomNav />
         </SafeAreaView>
     );
 }
@@ -200,7 +240,13 @@ const styles = StyleSheet.create({
         borderBottomColor: THEME.border,
     },
     backBtn: {
-        padding: 12,
+        minWidth: a11y.minTouchTargetSize,
+        minHeight: a11y.minTouchTargetSize,
+        justifyContent: 'center',
+        paddingHorizontal: spacing.sm,
+    },
+    headerSpacer: {
+        width: a11y.minTouchTargetSize,
     },
     headerTitle: {
         fontSize: 18,
@@ -208,8 +254,10 @@ const styles = StyleSheet.create({
         color: THEME.text,
     },
     scrollContent: {
-        padding: 24,
+        padding: spacing.lg,
+        paddingBottom: 32,
         alignItems: 'center',
+        flexGrow: 1,
     },
     iconContainer: {
         width: 100,
@@ -246,7 +294,7 @@ const styles = StyleSheet.create({
         borderRadius: 12,
         paddingHorizontal: 16,
         marginBottom: 20,
-        height: 56,
+        minHeight: a11y.minTouchTargetSize,
     },
     inputIcon: {
         marginRight: 12,
@@ -255,11 +303,20 @@ const styles = StyleSheet.create({
         flex: 1,
         fontSize: 16,
         color: THEME.text,
+        minHeight: a11y.minTouchTargetSize,
+        paddingVertical: 12,
+    },
+    visibilityToggle: {
+        minWidth: a11y.minTouchTargetSize,
+        minHeight: a11y.minTouchTargetSize,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     submitBtn: {
         backgroundColor: THEME.primary,
         borderRadius: 12,
-        height: 56,
+        minHeight: a11y.minTouchTargetSize,
+        paddingVertical: spacing.md,
         alignItems: 'center',
         justifyContent: 'center',
         marginTop: 12,
@@ -281,15 +338,21 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: '#EF4444',
-        padding: 10,
-        marginHorizontal: 16,
-        marginTop: 8,
+        padding: spacing.sm,
+        marginHorizontal: spacing.md,
+        marginTop: spacing.sm,
         borderRadius: 8,
     },
     errorText: {
         color: '#FFF',
-        marginLeft: 8,
+        marginLeft: spacing.sm,
         flex: 1,
         fontSize: 14,
+    },
+    errorDismiss: {
+        minWidth: a11y.minTouchTargetSize,
+        minHeight: a11y.minTouchTargetSize,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
 });

@@ -69,9 +69,10 @@ BEGIN
     END IF;
 
     -- Advisory lock: same caregiver + slot start => only one transaction proceeds at a time
+    -- pg_advisory_xact_lock(key1 int, key2 int) requires int; epoch::int is safe for dates through 2038
     PERFORM pg_advisory_xact_lock(
-        (abs(hashtext(p_caregiver_id::text))::bigint),
-        (extract(epoch from p_scheduled_date)::bigint)
+        abs(hashtext(p_caregiver_id::text)),
+        (extract(epoch from p_scheduled_date))::int
     );
 
     -- Re-check overlap inside transaction (unless emergency override)

@@ -32,23 +32,38 @@ export function useErrorHandler(): UseErrorHandlerReturn {
             return error;
         }
 
+        let message = '';
+
         // API error response format
         if (error?.response?.data?.error?.message) {
-            return error.response.data.error.message;
+            message = error.response.data.error.message;
+        } else if (error?.response?.data?.detail) {
+            message = typeof error.response.data.detail === 'string'
+                ? error.response.data.detail
+                : JSON.stringify(error.response.data.detail);
+        } else if (error?.response?.data?.message) {
+            message = error.response.data.message;
+        } else if (error?.message) {
+            message = error.message;
         }
 
-        if (error?.response?.data?.detail) {
-            return error.response.data.detail;
+        // Replace backend DB connection errors with a short user-friendly message
+        if (message && (
+            message.includes('Database connection failed') ||
+            message.includes('database pool') ||
+            (message.includes('db.') && message.includes('supabase.co') && message.includes('5432')) ||
+            message.includes('Network is unreachable')
+        )) {
+            return 'Service is temporarily unavailable. Please try again in a moment.';
         }
 
-        if (error?.response?.data?.message) {
-            return error.response.data.message;
+        // 405 Method Not Allowed — often from video/booking endpoints if app and backend are out of sync
+        if (error?.statusCode === 405 || error?.response?.status === 405 ||
+            (message && (message.toLowerCase().includes('method not allowed') || message.includes('405')))) {
+            return 'This action is not supported. Please update the app to the latest version and try again.';
         }
 
-        // Standard Error object
-        if (error?.message) {
-            return error.message;
-        }
+        if (message) return message;
 
         // Network errors
         if (error?.code === 'ECONNABORTED') {
