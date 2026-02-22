@@ -9,8 +9,8 @@ Usage:
   # Option 2: Use an existing access token (e.g. from app / network tab)
   RIYAZ_TOKEN=eyJhbGc... python backend/scripts/trigger_emergency_alert.py
 
-  # Custom API URL (default: http://localhost:8000)
-  EXPO_PUBLIC_API_BASE_URL=http://192.168.1.21:8000 RIYAZ_EMAIL=... RIYAZ_PASSWORD=... python backend/scripts/trigger_emergency_alert.py
+  # Custom API URL (default: production)
+  EXPO_PUBLIC_API_BASE_URL=https://assistlink-backend-1qjd.onrender.com RIYAZ_EMAIL=... RIYAZ_PASSWORD=... python backend/scripts/trigger_emergency_alert.py
 
 Run from repo root. Requires: pip install requests
 """
@@ -24,7 +24,7 @@ except ImportError:
     print("Install requests: pip install requests")
     sys.exit(1)
 
-BASE_URL = os.environ.get("EXPO_PUBLIC_API_BASE_URL", os.environ.get("API_BASE_URL", "http://localhost:8000")).rstrip("/")
+BASE_URL = os.environ.get("EXPO_PUBLIC_API_BASE_URL", os.environ.get("API_BASE_URL", "https://assistlink-backend-1qjd.onrender.com")).rstrip("/")
 EMAIL = os.environ.get("RIYAZ_EMAIL", "")
 PASSWORD = os.environ.get("RIYAZ_PASSWORD", "")
 TOKEN = os.environ.get("RIYAZ_TOKEN", "")

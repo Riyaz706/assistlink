@@ -82,6 +82,34 @@ This will create a `dist` folder containing the static files.
 
 ---
 
+## ✅ After Frontend Deployment — What’s Next
+
+1. **Verify the live site**
+   - Open your Hosting URL (e.g. `https://assistlink-67bb3-1a64d.web.app` or your new project URL).
+   - Confirm the app loads (no white screen, no “Site not found”).
+
+2. **Test app ↔ backend**
+   - Try **Login** (or sign up). If it fails, the frontend may not be allowed to call the backend (CORS).
+   - If you have **Settings → Connection** (or “Test connection”), run it to confirm the app can reach the backend.
+
+3. **CORS (if login/API calls fail)**
+   - In **Render** → your backend service → **Environment**:
+   - Set `CORS_ORIGINS` to `*` (allow all) or add your Firebase URL, e.g.  
+     `https://assistlink-67bb3-1a64d.web.app,https://assistlink-67bb3-1a64d.firebaseapp.com`  
+     (use your actual Hosting URL).
+   - Save and let the service redeploy.
+
+4. **Backend and database (already on cloud)**
+   - Backend: `https://assistlink-backend-1qjd.onrender.com` — no action unless you change it.
+   - Database: Supabase (cloud). No extra step after frontend deploy.
+
+5. **Optional next steps**
+   - **Mobile (Android):** `cd frontend && eas build --platform android --profile preview` (see Part 3 below).
+   - **Custom domain:** Firebase Console → Hosting → Add custom domain.
+   - **Safe Browsing:** If Chrome flags your `.web.app` URL, request a review at [Safe Browsing report](https://safebrowsing.google.com/safebrowsing/report_error/).
+
+---
+
 ## 📱 Part 3: Mobile Deployment (Optional)
 
 To deploy the Android app:

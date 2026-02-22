@@ -199,7 +199,7 @@ const SettingsScreen = ({ navigation }: any) => {
         <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>CONNECTION</Text>
         <View style={[styles.card, { backgroundColor: colors.card, padding: spacing.md }]}>
           <Text style={[styles.itemLabel, { color: colors.textSecondary, marginBottom: 6 }]}>
-            Backend URL (change when your IP changes)
+            Backend URL
           </Text>
           {backendUrlLoaded ? (
             <>
@@ -207,7 +207,7 @@ const SettingsScreen = ({ navigation }: any) => {
                 style={[styles.urlInput, { color: colors.textPrimary, borderColor: colors.border }]}
                 value={backendUrl}
                 onChangeText={setBackendUrl}
-                placeholder="http://192.168.1.x:8000"
+                placeholder="https://assistlink-backend-1qjd.onrender.com"
                 placeholderTextColor={colors.textSecondary}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -220,7 +220,7 @@ const SettingsScreen = ({ navigation }: any) => {
                   onPress={async () => {
                     const u = backendUrl.trim().replace(/\/$/, '');
                     if (!u) {
-                      Alert.alert('Error', 'Please enter a URL (e.g. http://192.168.1.9:8000)');
+                      Alert.alert('Error', 'Please enter a URL (e.g. https://assistlink-backend-1qjd.onrender.com)');
                       return;
                     }
                     setSavingUrl(true);
@@ -260,7 +260,7 @@ const SettingsScreen = ({ navigation }: any) => {
                   onPress={async () => {
                     const urlToTest = backendUrl.trim().replace(/\/$/, '') || getCurrentApiBaseUrl();
                     if (!urlToTest.startsWith('http')) {
-                      Alert.alert('Invalid URL', 'Enter a full URL (e.g. http://192.168.1.9:8000) first.');
+                      Alert.alert('Invalid URL', 'Enter a full URL (e.g. https://assistlink-backend-1qjd.onrender.com) first.');
                       return;
                     }
                     setTestingConnection(true);

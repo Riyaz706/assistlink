@@ -62,14 +62,14 @@ export function validateNoLoopback(baseUrl: string): { valid: boolean; message: 
     return {
       valid: false,
       message:
-        'EXPO_PUBLIC_API_BASE_URL is not set. Set it to your backend URL (LAN IP for dev, e.g. http://192.168.1.x:8000, or production HTTPS). Never use localhost/127.0.0.1/10.0.2.2 for multi-device testing.',
+        'EXPO_PUBLIC_API_BASE_URL is not set. Set it to your backend URL (e.g. https://assistlink-backend-1qjd.onrender.com). Never use localhost/127.0.0.1/10.0.2.2.',
     };
   }
   const url = baseUrl.trim().replace(/\/$/, '');
   if (isLoopback(url)) {
     return {
       valid: false,
-      message: `[NETWORK] EXPO_PUBLIC_API_BASE_URL must NOT be localhost, 127.0.0.1, or 10.0.2.2. Use your machine's LAN IP (e.g. http://192.168.1.x:8000) or a tunnel so all emulators/devices can reach the backend. Current value: ${url}`,
+      message: `[NETWORK] EXPO_PUBLIC_API_BASE_URL must NOT be localhost, 127.0.0.1, or 10.0.2.2. Use production URL (e.g. https://assistlink-backend-1qjd.onrender.com). Current value: ${url}`,
     };
   }
   return { valid: true, message: '' };
@@ -82,6 +82,6 @@ export function logNetworkFailure(context: string, error: unknown, url?: string)
   const msg = error instanceof Error ? error.message : String(error);
   const u = url || '';
   console.error(
-    `[NETWORK] ${context} failed: ${msg}. URL: ${u}. Ensure backend is reachable from this device (LAN IP or tunnel, not localhost).`
+    `[NETWORK] ${context} failed: ${msg}. URL: ${u}. Use https://assistlink-backend-1qjd.onrender.com or ensure backend is reachable.`
   );
 }
