@@ -1,4 +1,24 @@
-# Fix: "Custom scheme URIs are not allowed for 'WEB' client type"
+# Google OAuth on Android – Fixes
+
+## Fix 1: "Custom URI scheme is not enabled for your Android client" (Error 400: invalid_request)
+
+This error appears when the app uses the **Android** OAuth client and redirects back with a **custom URI scheme** (e.g. `assistlink://`). Google disables custom URI schemes for Android clients by default.
+
+**What to do:**
+
+1. Open [Google Cloud Console](https://console.cloud.google.com/) → your project → **APIs & Credentials**.
+2. Under **OAuth 2.0 Client IDs**, click your **Android** client (the one with package `com.assistlink.app`).
+3. Scroll to **Advanced settings** (or open the client and look for it).
+4. Find **Custom URI scheme** and **enable** it (e.g. turn on “Allow custom URI scheme” or the equivalent toggle).
+5. Save the client.
+
+After saving, try “Sign in with Google” again. Changes can take a few minutes to apply.
+
+Google recommends using their native SDK instead of custom schemes for new apps; enabling the custom scheme is the quick fix so Expo’s `expo-auth-session` flow (which uses `assistlink://` redirect) keeps working.
+
+---
+
+## Fix 2: "Custom scheme URIs are not allowed for 'WEB' client type"
 
 This error happens when the app uses a **Web** OAuth client ID on Android but sends a custom redirect URI (e.g. `exp://...` or `assistlink://...`). Google only allows **https** redirects for Web clients.
 
@@ -24,6 +44,19 @@ The app now uses the **Android** OAuth client ID when running on Android (and **
 4. If you test in **Expo Go** and also ship a **built APK**, you can create two Android clients (one with `host.exp.exponent`, one with `com.assistlink.app`) and use the Expo Go client ID only in development env if you want.
 
 After adding the Android client with the correct package name and SHA-1, "Sign in with Google" on Android should work without the "Custom scheme URIs are not allowed for 'WEB' client type" error.
+
+---
+
+## Current EAS production build (riyaz_08/assistlink)
+
+For the APK built from **frontend** with EAS project `99c43cf1-633b-4c83-9bfd-7504a93229a5` (production profile):
+
+| Field | Value |
+|-------|--------|
+| **Package name** | `com.assistlink.app` |
+| **SHA-1** | `B5:6A:9D:69:2A:E8:FE:10:09:0D:23:64:01:2B:98:2B:3D:17:DD:6A` |
+
+**To enable Google Sign-In for this APK:** In [Google Cloud Console](https://console.cloud.google.com/apis/credentials) → your **Android** OAuth client (package `com.assistlink.app`) → add the SHA-1 above to the certificate fingerprints (or add a second Android client with this package + SHA-1 if you already have one with a different SHA-1). No code or client ID changes needed.
 
 ---
 

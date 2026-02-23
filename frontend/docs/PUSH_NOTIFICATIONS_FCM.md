@@ -1,5 +1,14 @@
 # Android Push Notifications (FCM)
 
+## Implementation summary
+
+- **Expo push tokens**: The app uses `expo-notifications` and registers an **Expo push token** with the backend. The backend sends notifications via the **Expo Push API** (Expo’s servers use FCM to deliver to Android).
+- **When logged in**: The device is registered for push only after the user is logged in (`useNotifications` + `useAuth`). On login, the app gets the token and calls `POST /notifications/devices`.
+- **On logout**: The device is unregistered by calling `DELETE /notifications/devices/:token`, so the user stops receiving push on that device.
+- **EAS build**: For **background** push on Android, FCM must be set up: `google-services.json` in the project and FCM credentials (preferably **FCM V1**) uploaded to EAS.
+
+---
+
 If you see:
 
 **"Default FirebaseApp is not initialized"** or **"Make sure to complete the guide at https://docs.expo.dev/push-notifications/fcm-credentials/"**
@@ -33,10 +42,14 @@ The app now treats this as a warning and continues. No code change needed.
    ```
 
 5. **Upload FCM credentials to EAS** (so Expo can send push for you):
-   - In Firebase: Project settings → Service accounts → Generate new private key (JSON).
-   - Run `eas credentials` → Android → production → Set up Google Service Account Key for Push Notifications (FCM V1) → Upload the JSON.
-
-Full steps: [Expo – FCM credentials](https://docs.expo.dev/push-notifications/fcm-credentials/).
+   - **FCM V1 (recommended):**
+     - Firebase Console → Project settings → **Service accounts** → **Generate new private key** (downloads a JSON file).
+     - In terminal: `cd frontend` then `eas credentials -p android`.
+     - Choose your build profile (e.g. **production**).
+     - Under **Push Notifications (FCM V1)** choose **Set up a FCM V1 key** (or **Upload a FCM V1 key**) and upload the service account JSON.
+     - Rebuild the app so the new credentials are used: `eas build --platform android --profile production`.
+   - **FCM Legacy:** You can also add a Legacy server key under **Push Notifications (FCM Legacy)** if needed; Expo recommends FCM V1 for new projects.
+   - Full steps: [Expo – FCM credentials](https://docs.expo.dev/push-notifications/fcm-credentials/).
 
 ## Skip FCM (no background push)
 

@@ -17,6 +17,9 @@ Use this when Render asks for env vars (Deploy Blueprint / Environment tab). **Y
 | **TWILIO_ACCOUNT_SID** | [Twilio Console](https://console.twilio.com) → Account → API keys & tokens (or Dashboard) | `ACxxxxxxxx...` (optional) |
 | **TWILIO_API_KEY** | Twilio → Account → API keys → Create API key → SID + Secret | `SKxxxxxxxx...` (optional) |
 | **TWILIO_API_SECRET** | Same step; secret shown once when you create the key | (optional) |
+| **GOOGLE_WEB_CLIENT_ID** | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) → OAuth 2.0 Client ID (Web) | Required for Google sign-in |
+| **GOOGLE_IOS_CLIENT_ID** | Same → OAuth client (iOS) if you have one | Optional; can match Web |
+| **GOOGLE_ANDROID_CLIENT_ID** | Same → OAuth client (Android), package `com.assistlink.app` | Required for Google sign-in on Android app |
 
 ---
 
@@ -56,6 +59,17 @@ https://your-project-id.web.app,https://your-project-id.firebaseapp.com
    - **Important for Render:** Use the **Session** or **Transaction** pooler (port **6543**), not the direct connection (port 5432). Direct `db.xxx.supabase.co:5432` often fails from Render with "Network is unreachable".
    - Copy the **pooler** URI (host like `aws-0-xx.pooler.supabase.com`, port **6543**); replace `[YOUR-PASSWORD]` with your database password.
    - Use that as `DATABASE_URL` in Render.
+
+### Google OAuth (required for “Sign in with Google”)
+
+If **Google sign-in is not working** on the deployed app, the backend must have these set in Render:
+
+1. [Google Cloud Console](https://console.cloud.google.com/apis/credentials) → **APIs & Credentials** → OAuth 2.0 Client IDs.
+2. **GOOGLE_WEB_CLIENT_ID**: Your **Web** client ID (e.g. `xxxxx.apps.googleusercontent.com`).
+3. **GOOGLE_ANDROID_CLIENT_ID**: Your **Android** client ID (package `com.assistlink.app`, SHA-1 added). Same value as in the app’s `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID`.
+4. **GOOGLE_IOS_CLIENT_ID**: Your iOS client ID if you use iOS; can be the same as Web for testing.
+
+Add all three in Render → **Environment** → Save and redeploy. The backend verifies the Google ID token against these client IDs; if any is missing, token verification fails and you get “Invalid Google ID token”.
 
 ### Twilio (optional — for video/SMS)
 

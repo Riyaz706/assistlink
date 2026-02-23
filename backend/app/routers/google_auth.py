@@ -47,8 +47,9 @@ async def google_auth(payload: GoogleAuthRequest):
                 detail="Google OAuth is not configured. Please set GOOGLE_*_CLIENT_ID environment variables."
             )
         
-        # Try to verify with each client ID
+        # Try to verify with each client ID (Web, iOS, Android - token aud may match any)
         idinfo = None
+        last_error = None
         for client_id in valid_client_ids:
             try:
                 idinfo = id_token.verify_oauth2_token(
@@ -57,13 +58,15 @@ async def google_auth(payload: GoogleAuthRequest):
                     client_id
                 )
                 break
-            except ValueError:
+            except ValueError as e:
+                last_error = e
                 continue
-        
+
         if not idinfo:
+            print(f"[GoogleAuth] Invalid ID token. Last error: {last_error}")
             raise HTTPException(
                 status_code=401,
-                detail="Invalid Google ID token"
+                detail="Invalid Google ID token. Ensure GOOGLE_WEB_CLIENT_ID, GOOGLE_IOS_CLIENT_ID, and GOOGLE_ANDROID_CLIENT_ID are set on the server (e.g. Render) and match your Google Cloud OAuth clients."
             )
         
         # Extract user info from the token
@@ -80,12 +83,12 @@ async def google_auth(payload: GoogleAuthRequest):
         
         # Check if user exists in Supabase Auth
         try:
-            # Try to get user by email
+            # list_users() returns an object with .users (list)
             user_response = supabase_admin.auth.admin.list_users()
+            users_list = getattr(user_response, "users", None) or []
             existing_user = None
-            
-            for user in user_response:
-                if user.email == email:
+            for user in users_list:
+                if getattr(user, "email", None) == email:
                     existing_user = user
                     break
             

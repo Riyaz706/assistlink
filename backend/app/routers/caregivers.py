@@ -329,12 +329,13 @@ async def list_caregivers(
                     )
                     continue  # Skip this caregiver
 
-                # Check for active bookings (pending, accepted, or in_progress - but NOT completed)
+                # Check for active bookings (requested, accepted, or in_progress - but NOT completed)
+                # DB enum uses "requested" not "pending"
                 active_bookings = (
                     supabase_admin.table("bookings")
                     .select("id")
                     .eq("caregiver_id", caregiver_id)
-                    .in_("status", ["pending", "accepted", "in_progress"])
+                    .in_("status", ["requested", "accepted", "in_progress"])
                     .execute()
                 )
 

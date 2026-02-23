@@ -5,6 +5,7 @@ import Constants from 'expo-constants';
 import { Platform, Vibration, Alert } from 'react-native';
 import { api } from '../api/client';
 import * as RootNavigation from '../navigation/RootNavigation';
+import { useAuth } from '../context/AuthContext';
 
 // Configure notification behavior: every notification shows with sound and vibration
 Notifications.setNotificationHandler({
@@ -25,30 +26,45 @@ Notifications.setNotificationHandler({
 });
 
 export function useNotifications(navigation?: any) {
+    const { user } = useAuth();
     const [expoPushToken, setExpoPushToken] = useState<string>('');
     const [notification, setNotification] = useState<Notifications.Notification | undefined>(undefined);
     const notificationListener = useRef<Notifications.Subscription | undefined>(undefined);
     const responseListener = useRef<Notifications.Subscription | undefined>(undefined);
+    const lastRegisteredToken = useRef<string | null>(null);
+
+    // Get FCM/Expo push token and register with backend only when user is logged in
+    useEffect(() => {
+        if (!user) {
+            if (lastRegisteredToken.current) {
+                api.unregisterDevice(lastRegisteredToken.current).catch(() => {});
+                lastRegisteredToken.current = null;
+            }
+            setExpoPushToken('');
+            return;
+        }
+
+        registerForPushNotificationsAsync().then(token => {
+            if (!token) return;
+            setExpoPushToken(token);
+            lastRegisteredToken.current = token;
+            api.registerDevice({
+                device_token: token,
+                platform: Platform.OS,
+                device_info: {
+                    deviceName: Device.deviceName || 'Unknown',
+                    modelName: Device.modelName || 'Unknown',
+                    osVersion: Device.osVersion || 'Unknown',
+                }
+            }).then(() => {
+                console.log('✅ Device registered for push notifications');
+            }).catch(err => {
+                console.error('Failed to register device:', err);
+            });
+        });
+    }, [user?.id]);
 
     useEffect(() => {
-        registerForPushNotificationsAsync().then(token => {
-            if (token) {
-                setExpoPushToken(token);
-                // Register with backend
-                api.registerDevice({
-                    device_token: token,
-                    platform: Platform.OS,
-                    device_info: {
-                        deviceName: Device.deviceName || 'Unknown',
-                        modelName: Device.modelName || 'Unknown',
-                        osVersion: Device.osVersion || 'Unknown',
-                    }
-                }).catch(err => {
-                    console.error('Failed to register device:', err);
-                });
-            }
-        });
-
         // Listen for notifications while app is in foreground (sound + vibration; emergency = popup alert)
         notificationListener.current = Notifications.addNotificationReceivedListener(notification => {
             console.log('📬 Notification received:', notification);
