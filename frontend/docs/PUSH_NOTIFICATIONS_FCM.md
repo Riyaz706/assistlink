@@ -7,6 +7,16 @@
 - **On logout**: The device is unregistered by calling `DELETE /notifications/devices/:token`, so the user stops receiving push on that device.
 - **EAS build**: For **background** push on Android, FCM must be set up: `google-services.json` in the project and FCM credentials (preferably **FCM V1**) uploaded to EAS.
 
+### "No devices registered for this user"
+
+If the backend logs show **No devices registered for this user** when sending an emergency (or any) push, it means that **recipient** has no rows in `user_devices`. To receive push, that user must:
+
+1. Log in to the app on the device (care recipient or caregiver).
+2. Grant notification permission when prompted.
+3. Have the app successfully register the device (Expo push token is sent to `POST /notifications/devices`).
+
+So for **emergency alerts to caregivers**: each caregiver who should get the push must have opened the app at least once while logged in on that phone (with notifications allowed). The in-app notification is still created and visible when they open the app; only the push to the device is skipped when no device is registered.
+
 ---
 
 If you see:

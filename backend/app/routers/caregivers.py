@@ -234,15 +234,15 @@ async def list_caregivers(
                     if profile and profile.get("availability_status") == availability_status:
                         caregivers.append(caregiver)
         else:
-            # Default: show only "available" caregivers (or those without profiles, which default to available)
-            # Filter by availability status first, then filter by active commitments
+            # Default: show "available" and "busy" caregivers (exclude only "unavailable")
+            # So caregivers like "riyaz" still appear when marked busy; active commitments filter runs next
             caregivers = []
             for caregiver in all_caregivers:
                 profile = _normalize_profile(caregiver.get("caregiver_profile"))
                 current_caregiver_status = profile.get("availability_status") if profile else None
 
-                # Include if no profile (defaults to available) or status is "available"
-                if current_caregiver_status is None or current_caregiver_status == "available":
+                # Include if no profile, "available", or "busy"; only exclude "unavailable"
+                if current_caregiver_status != "unavailable":
                     caregivers.append(caregiver)
         
         print(f"[INFO] After availability_status filter: {len(caregivers)} caregivers", flush=True)

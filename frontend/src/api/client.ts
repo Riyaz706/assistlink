@@ -502,6 +502,47 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  /**
+   * Upload profile photo to cloud (Supabase Storage via backend).
+   * Pass the local image URI from the image picker; the backend stores it and returns the public URL.
+   */
+  uploadProfilePhoto: async (imageUri: string, fileName?: string, mimeType?: string): Promise<{ profile_photo_url: string }> => {
+    let token = accessToken;
+    if (!token) token = await getTokenFromStorage();
+    if (!token) {
+      const err: any = new Error("Not authenticated");
+      err.code = "UNAUTHORIZED";
+      err.statusCode = 401;
+      throw err;
+    }
+    const formData = new FormData();
+    formData.append("file", {
+      uri: imageUri,
+      name: fileName || "photo.jpg",
+      type: mimeType || "image/jpeg",
+    } as any);
+    const url = `${currentBaseUrl}/api/users/profile/photo`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      let message = text || `Upload failed (${res.status})`;
+      try {
+        const json = JSON.parse(text);
+        if (json.detail) message = typeof json.detail === "string" ? json.detail : JSON.stringify(json.detail);
+      } catch {
+        // keep message as text
+      }
+      const err: any = new Error(message);
+      err.statusCode = res.status;
+      throw err;
+    }
+    return JSON.parse(text || "{}");
+  },
+
   // Notifications
   getNotifications: (opts: {
     limit?: number;

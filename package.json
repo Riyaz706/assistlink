@@ -6,7 +6,9 @@
     "test:backend": "cd backend && PYTHONPATH=. pytest tests/ -v",
     "test:all": "npm run test:backend && npm run test",
     "e2e": "playwright test",
-    "e2e:headed": "playwright test --headed"
+    "e2e:headed": "playwright test --headed",
+    "build:android": "cd frontend && eas build --platform android --profile production",
+    "build:android:preview": "cd frontend && eas build --platform android --profile preview"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0"

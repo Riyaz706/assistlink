@@ -1,8 +1,11 @@
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, status, Depends, File, UploadFile
 from datetime import datetime
 from app.schemas import UserUpdate, UserResponse
 from app.database import supabase, supabase_admin
 from app.dependencies import get_current_user, get_user_id
+
+# Bucket for profile photos in Supabase Storage (create in Dashboard and set to public)
+PROFILE_PHOTOS_BUCKET = "profile-photos"
 
 router = APIRouter()
 
@@ -146,5 +149,64 @@ async def update_profile(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
+        )
+
+
+# Allowed image types for profile photo
+ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+MAX_PROFILE_PHOTO_BYTES = 5 * 1024 * 1024  # 5 MB
+
+
+@router.post("/profile/photo")
+async def upload_profile_photo(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Upload profile photo to cloud (Supabase Storage) and update user profile_photo_url."""
+    try:
+        user_id = get_user_id(current_user)
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid user data: user ID not found",
+            )
+        user_id_str = str(user_id)
+
+        content_type = (file.content_type or "").lower()
+        if content_type not in ALLOWED_CONTENT_TYPES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid file type. Allowed: JPEG, PNG, WebP, GIF. Got: {content_type or 'unknown'}",
+            )
+
+        body = await file.read()
+        if len(body) > MAX_PROFILE_PHOTO_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File too large. Maximum size is 5 MB.",
+            )
+
+        # Use a fixed path per user so uploading again overwrites (upsert)
+        ext = "jpg" if "jpeg" in content_type or "jpg" in content_type else "png" if "png" in content_type else "webp" if "webp" in content_type else "gif"
+        storage_path = f"{user_id_str}/avatar.{ext}"
+
+        storage = supabase_admin.storage.from_(PROFILE_PHOTOS_BUCKET)
+        storage.upload(
+            path=storage_path,
+            file=body,
+            file_options={"content-type": content_type, "upsert": "true"},
+        )
+        public_url = storage.get_public_url(storage_path)
+
+        # Update user profile with new photo URL
+        supabase_admin.table("users").update({"profile_photo_url": public_url}).eq("id", user_id_str).execute()
+
+        return {"profile_photo_url": public_url}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Upload failed: {str(e)}",
         )
 

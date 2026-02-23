@@ -55,7 +55,10 @@ async def create_notification(
             print(f"📤 Triggering push notification...", file=sys.stderr, flush=True)
             try:
                 push_result = await send_push_notification(user_id, title, body, data, notification_type=notification_type)
-                print(f"Push notification result: {push_result}", file=sys.stderr, flush=True)
+                if push_result:
+                    print(f"Push notification result: {push_result}", file=sys.stderr, flush=True)
+                else:
+                    print("Push not sent (user has no registered devices or send failed).", file=sys.stderr, flush=True)
             except Exception as push_error:
                 print(f"⚠️ Push notification failed (but in-app notification created): {push_error}", file=sys.stderr, flush=True)
             return notification
@@ -109,7 +112,7 @@ async def send_push_notification(
         devices_response = supabase_admin.table("user_devices").select("device_token, platform").eq("user_id", user_id).eq("is_active", True).execute()
         
         if not devices_response.data:
-            print("❌ No devices registered for this user", file=sys.stderr, flush=True)
+            print("ℹ️ No devices registered for this user — they need to open the app while logged in (with notification permission) to receive push.", file=sys.stderr, flush=True)
             return False
 
         devices = devices_response.data

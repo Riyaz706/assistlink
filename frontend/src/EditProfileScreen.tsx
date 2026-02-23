@@ -93,16 +93,14 @@ export default function EditProfileScreen({ navigation, route }: any) {
       });
 
       if (!result.canceled && result.assets && result.assets[0]) {
-        // For now, we'll use the local URI
-        // In production, you'd upload this to a storage service (Supabase Storage, AWS S3, etc.)
-        // and get back a URL to store in profile_photo_url
-        const imageUri = result.assets[0].uri;
-        setProfilePhotoUrl(imageUri);
-        Alert.alert(
-          'Image Selected',
-          'Image selected. Note: For production, you need to upload this image to a storage service and use the returned URL.',
-          [{ text: 'OK' }]
-        );
+        const asset = result.assets[0];
+        const imageUri = asset.uri;
+        const fileName = asset.fileName || 'photo.jpg';
+        const mimeType = asset.mimeType || 'image/jpeg';
+
+        const { profile_photo_url } = await api.uploadProfilePhoto(imageUri, fileName, mimeType);
+        setProfilePhotoUrl(profile_photo_url);
+        if (refreshUser) refreshUser();
       }
     } catch (error: any) {
       handleError(error, 'image-picker');

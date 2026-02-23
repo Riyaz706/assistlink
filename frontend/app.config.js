@@ -1,6 +1,17 @@
 // Load .env - Expo loads EXPO_PUBLIC_* automatically, but we expose in extra for reliability
 const apiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || 'https://assistlink-backend-1qjd.onrender.com';
 
+// EAS projectId: from env, or from app.json after running "eas init --id <PROJECT_ID>"
+let easProjectId = process.env.EXPO_PUBLIC_EAS_PROJECT_ID;
+if (!easProjectId) {
+  try {
+    const appJson = require('./app.json');
+    easProjectId = appJson?.expo?.extra?.eas?.projectId || null;
+  } catch {
+    // no app.json or no projectId yet
+  }
+}
+
 export default {
   expo: {
     name: 'AssistLink',
@@ -68,7 +79,7 @@ export default {
     ],
     web: { favicon: './assets/favicon.png' },
     extra: {
-      eas: { projectId: '27503afd-27f0-43cb-b2e2-c6142e7f8efb' },
+      ...(easProjectId && { eas: { projectId: easProjectId } }),
       apiBaseUrl,
       EXPO_PUBLIC_API_BASE_URL: apiBaseUrl,
       EXPO_PUBLIC_APP_ENV: process.env.EXPO_PUBLIC_APP_ENV || 'production',
@@ -79,6 +90,6 @@ export default {
       EXPO_PUBLIC_SUPABASE_URL: process.env.EXPO_PUBLIC_SUPABASE_URL,
       EXPO_PUBLIC_SUPABASE_ANON_KEY: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
     },
-    owner: 'riyaz_26',
+    owner: 'riyaz_08',
   },
 };
