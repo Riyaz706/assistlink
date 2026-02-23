@@ -12,11 +12,11 @@ from ..config import settings
 
 router = APIRouter()
 
-# Google OAuth Client IDs (will be loaded from environment)
+# Google OAuth Client IDs (from settings so .env is respected)
 GOOGLE_CLIENT_IDS = [
-    os.getenv("GOOGLE_WEB_CLIENT_ID", ""),
-    os.getenv("GOOGLE_IOS_CLIENT_ID", ""),
-    os.getenv("GOOGLE_ANDROID_CLIENT_ID", ""),
+    getattr(settings, "GOOGLE_WEB_CLIENT_ID", None) or os.getenv("GOOGLE_WEB_CLIENT_ID", ""),
+    getattr(settings, "GOOGLE_IOS_CLIENT_ID", None) or os.getenv("GOOGLE_IOS_CLIENT_ID", ""),
+    getattr(settings, "GOOGLE_ANDROID_CLIENT_ID", None) or os.getenv("GOOGLE_ANDROID_CLIENT_ID", ""),
 ]
 
 class GoogleAuthRequest(BaseModel):

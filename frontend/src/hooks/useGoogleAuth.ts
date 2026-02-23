@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
-import Constants, { ExecutionEnvironment } from 'expo-constants';
+import Constants from 'expo-constants';
 
 // Required for Expo Go to work properly
 WebBrowser.maybeCompleteAuthSession();
@@ -24,24 +24,22 @@ export function useGoogleAuth() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
 
-    // In Expo Go, we must use the Web Client ID because the package name (host.exp.exponent) 
-    // doesn't match our Google Cloud Console configuration (com.assistlink.app).
-    // Failing to do this results in "Access blocked: This app’s request is invalid" (Error 400).
-
-    const [request, response, promptAsync] = Google.useIdTokenAuthRequest({
-        clientId: GOOGLE_WEB_CLIENT_ID,
-        iosClientId: isExpoGo ? undefined : GOOGLE_IOS_CLIENT_ID,
-        androidClientId: isExpoGo ? undefined : GOOGLE_ANDROID_CLIENT_ID,
-    });
+    // Use Android/iOS client on native so Google validates by package+SHA-1, not redirect URI.
+    // Otherwise custom scheme (exp://, assistlink://) causes "Custom scheme URIs are not allowed for 'WEB' client type".
+    const [request, response, promptAsync] = Google.useIdTokenAuthRequest(
+        {
+            clientId: GOOGLE_WEB_CLIENT_ID,
+            webClientId: GOOGLE_WEB_CLIENT_ID,
+            iosClientId: GOOGLE_IOS_CLIENT_ID,
+            androidClientId: GOOGLE_ANDROID_CLIENT_ID,
+        },
+        {}
+    );
 
     useEffect(() => {
         if (request) {
             console.log('[GoogleAuth] Redirect URI:', request.redirectUri);
-            if (isExpoGo) {
-                console.log('[GoogleAuth] Running in Expo Go: Forcing Web Auth Flow to avoid package mismatch');
-            }
         }
     }, [request]);
 
