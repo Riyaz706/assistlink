@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "d571ea68-8073-46e3-8bef-4730004a8798"
+      }
+    },
+    "android": {
+      "package": "com.riyaz_26.assistlinkroot"
+    }
+  }
+}

@@ -1,4 +1,4 @@
-# AssistLink — UI/UX Design Specification
+r# AssistLink — UI/UX Design Specification
 
 **Principal design doc for a calm, accessible, production PWA.**  
 Audience: Elderly users, differently-abled users, caregivers under stress (exams, emergencies).

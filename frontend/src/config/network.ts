@@ -10,9 +10,17 @@ const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '10.0.2.2'];
 const PRODUCTION_DEFAULT = 'https://assistlink-backend-1qjd.onrender.com';
 
 function getAppEnv(): AppEnv {
-  const env = (process.env.EXPO_PUBLIC_APP_ENV || process.env.NODE_ENV || 'development').toLowerCase();
+  let env = process.env.EXPO_PUBLIC_APP_ENV || process.env.NODE_ENV || '';
+  if (!env) {
+    try {
+      const c = require('expo-constants').default?.expoConfig?.extra;
+      env = c?.EXPO_PUBLIC_APP_ENV || c?.NODE_ENV || '';
+    } catch {}
+  }
+  env = String(env).toLowerCase();
   if (env === 'production' || env === 'prod') return 'production';
   if (env === 'staging' || env === 'stage') return 'staging';
+  if (env === 'development' || env === 'dev') return 'development';
   return 'development';
 }
 
@@ -27,14 +35,13 @@ function isLoopback(url: string): boolean {
  */
 export function getApiBaseUrlFromEnv(): string {
   const fromEnv = process.env.EXPO_PUBLIC_API_BASE_URL;
-  if (fromEnv && fromEnv.trim()) {
-    return fromEnv.trim().replace(/\/$/, '');
+  if (fromEnv && String(fromEnv).trim()) {
+    return String(fromEnv).trim().replace(/\/$/, '');
   }
   try {
     const Constants = require('expo-constants').default;
-    const fromExtra =
-      Constants.expoConfig?.extra?.apiBaseUrl ||
-      Constants.expoConfig?.extra?.EXPO_PUBLIC_API_BASE_URL;
+    const extra = Constants.expoConfig?.extra;
+    const fromExtra = extra?.apiBaseUrl || extra?.EXPO_PUBLIC_API_BASE_URL;
     if (fromExtra && String(fromExtra).trim()) {
       return String(fromExtra).trim().replace(/\/$/, '');
     }
@@ -45,8 +52,7 @@ export function getApiBaseUrlFromEnv(): string {
   if (env === 'production') {
     return PRODUCTION_DEFAULT;
   }
-  // Development/staging: no default; caller must ensure env is set or validation will fail
-  return '';
+  return PRODUCTION_DEFAULT;
 }
 
 export function getAppEnvironment(): AppEnv {

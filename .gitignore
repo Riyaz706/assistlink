@@ -10,3 +10,7 @@ dist/
 
 # Local bug reports / artifacts
 bugreport-*.zip
+
+# Firebase service account keys (never commit)
+*firebase*adminsdk*.json
+*-firebase-adminsdk-*.json

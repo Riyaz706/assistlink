@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
+import Constants from 'expo-constants';
 import { Platform, Vibration, Alert } from 'react-native';
 import { api } from '../api/client';
 import * as RootNavigation from '../navigation/RootNavigation';
@@ -131,7 +132,10 @@ async function registerForPushNotificationsAsync() {
     }
 
     try {
-        const pushTokenData = await Notifications.getExpoPushTokenAsync();
+        const projectId = Constants.expoConfig?.extra?.eas?.projectId as string | undefined;
+        const pushTokenData = await Notifications.getExpoPushTokenAsync(
+            projectId ? { projectId } : undefined
+        );
         token = pushTokenData.data;
         console.log('✅ Expo Push Token:', token);
     } catch (error: any) {
@@ -176,64 +180,51 @@ async function registerForPushNotificationsAsync() {
 }
 
 function handleNotificationAction(data: any, navigation?: any) {
-    if (!navigation) {
-        console.log('Navigation not available');
-        return;
-    }
+    const navigate = (name: string, params?: object) => {
+        if (navigation) {
+            navigation.navigate(name, params);
+        } else {
+            RootNavigation.navigate(name, params);
+        }
+    };
 
     const action = data?.action;
-
     console.log('Handling notification action:', action, data);
 
     switch (action) {
         case 'open_chat':
             if (data.chat_session_id) {
-                navigation.navigate('ChatDetailsScreen', {
-                    chatSessionId: data.chat_session_id
-                });
+                navigate('ChatDetailsScreen', { chatSessionId: data.chat_session_id });
             }
             break;
-
         case 'view_booking':
             if (data.booking_id) {
-                navigation.navigate('BookingDetails', {
-                    bookingId: data.booking_id
-                });
+                navigate('BookingDetails', { bookingId: data.booking_id });
             }
             break;
-
         case 'view_video_call':
         case 'join_call':
             if (data.video_call_id) {
-                navigation.navigate('VideoCallScreen', {
-                    callId: data.video_call_id
-                });
+                navigate('VideoCallScreen', { callId: data.video_call_id });
             }
             break;
-
         case 'view_emergency':
-            // Only pass emergency_id (UUID of the emergency row). Do not use care_recipient_id as fallback or resolve will fail.
             if (data.emergency_id) {
-                navigation.navigate('EmergencyScreen', {
+                navigate('EmergencyScreen', {
                     emergency_id: data.emergency_id,
                     notification: { data: { emergency_id: data.emergency_id, location: data.location } },
                     care_recipient_id: data.care_recipient_id,
-                    location: data.location
+                    location: data.location,
                 });
             }
             break;
-
         case 'view_payment':
             if (data.payment_id) {
-                navigation.navigate('PaymentScreen', {
-                    bookingId: data.payment_id
-                });
+                navigate('PaymentScreen', { bookingId: data.payment_id });
             }
             break;
-
         default:
-            // Navigate to notifications screen
-            navigation.navigate('Notifications');
+            navigate('Notifications');
             break;
     }
 }

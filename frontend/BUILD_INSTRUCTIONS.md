@@ -3,6 +3,20 @@
 ## Why Expo Go Won't Work
 This app uses native modules (`react-native-maps` and `expo-location`) that are not supported in Expo Go. You need to build a development build.
 
+---
+
+## Ways to Build an APK (choose one)
+
+| Method | Command / Steps | Use when |
+|--------|-----------------|----------|
+| **1. Local APK (one command)** | `npm run build:android:local` | You have Android SDK; want a file without EAS/cloud |
+| **2. EAS Build (cloud)** | `npm run build:android` or `eas build --platform android --profile preview` | No local Android SDK; build in Expo cloud |
+| **3. USB + install** | `npm run android` or `npx expo run:android` | Device connected; build and install in one step |
+| **4. Prebuild + Gradle** | See Option 2 below | Manual control; debug or release APK |
+| **5. Android Studio** | Prebuild then open `android/` in Android Studio | Prefer GUI to build APK |
+
+---
+
 ## Option 1: Build and Install via USB (Recommended)
 
 ### Prerequisites
@@ -32,20 +46,54 @@ Once installed, you can:
 - Run `npx expo start --dev-client` to start the development server
 - The app will automatically connect to the development server
 
-## Option 2: Build APK and Install Manually
+## Option 2: Prebuild + Gradle (standalone APK)
 
-If you can't connect via USB, you can build an APK:
+**One command (macOS/Linux):** from `frontend/` run:
+```bash
+npm run build:android:local
+```
+APK output: `frontend/android/app/build/outputs/apk/debug/app-debug.apk`
+
+Or do it step by step (generates the native `android/` folder):
 
 ```bash
 cd frontend
 npx expo prebuild --platform android
 cd android
-.\gradlew.bat assembleDebug
+# macOS / Linux:
+./gradlew assembleDebug
+# Windows:
+# .\gradlew.bat assembleDebug
 ```
 
-The APK will be at: `android/app/build/outputs/apk/debug/app-debug.apk`
+- **Debug APK:** `android/app/build/outputs/apk/debug/app-debug.apk`  
+- **Release APK** (signed): `./gradlew assembleRelease` → `android/app/build/outputs/apk/release/app-release.apk` (requires signing config).
 
-Transfer this APK to your phone and install it.
+Transfer the APK to your phone and install it.
+
+---
+
+## Option 3: EAS Build (Expo cloud)
+
+No local Android SDK needed. Build in the cloud and download the APK.
+
+1. Install EAS CLI: `npm install -g eas-cli`
+2. Log in: `eas login`
+3. Configure (first time): `eas build:configure`
+4. Build APK: `eas build --platform android --profile preview` (or `production`)
+
+Download the APK from the link in the terminal or from [expo.dev](https://expo.dev) → your project → Builds.
+
+---
+
+## Option 4: Android Studio
+
+After generating the native project (Option 2):
+
+1. Run `npx expo prebuild --platform android` from `frontend/`.
+2. Open **Android Studio** → **Open** → select the `frontend/android` folder.
+3. **Build** → **Build Bundle(s) / APK(s)** → **Build APK(s)** (or **Build Signed Bundle / APK** for release).
+4. APK path: `frontend/android/app/build/outputs/apk/debug/app-debug.apk` (or release).
 
 ## Network Configuration
 

@@ -56,4 +56,6 @@ dmypy.json
 
 credentials/
 firebase-service-account.json
+*firebase*adminsdk*.json
+*-firebase-adminsdk-*.json
 # *.json - Removed as it blocks nested frontend files

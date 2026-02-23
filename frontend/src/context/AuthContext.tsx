@@ -6,7 +6,7 @@ import React, {
   ReactNode,
 } from "react";
 import * as SecureStore from "expo-secure-store";
-import { api, apiConfigReady, setAccessToken, setRefreshToken } from "../api/client";
+import { api, apiConfigReady, setAccessToken, setRefreshToken, wakeUpBackend } from "../api/client";
 import { Platform } from "react-native";
 
 type User = any;
@@ -102,6 +102,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.log("AuthContext: Restoring authentication state...");
       try {
         await apiConfigReady; // use saved Backend URL override if set (so IP change works without rebuild)
+        wakeUpBackend(); // fire-and-forget: wake Render if it spun down (free tier)
         const token = await getToken();
         if (token) {
           console.log("AuthContext: Token found, validating with backend...");
@@ -111,7 +112,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             e?.code === 'TIMEOUT' || e?.statusCode === 408 ||
             (e?.message && /timeout|network|connection|fetch/i.test(e.message || ''));
           let meError: any = null;
-          for (let attempt = 1; attempt <= 2 && isMounted; attempt++) {
+          const maxAttempts = 3; // 3rd attempt after 15s for Render cold start
+          for (let attempt = 1; attempt <= maxAttempts && isMounted; attempt++) {
             try {
               const me = await api.me();
               if (isMounted) {
@@ -133,9 +135,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                   setUser(null);
                   break;
                 }
-                if (attempt === 1 && isTimeoutOrNetwork(meError)) {
-                  console.log("AuthContext: Retrying /api/auth/me in 2s...");
-                  await new Promise((r) => setTimeout(r, 2000));
+                if (attempt < maxAttempts && isTimeoutOrNetwork(meError)) {
+                  const delayMs = attempt === 1 ? 2000 : 15000; // 2s then 15s (cold start)
+                  console.log(`AuthContext: Retrying /api/auth/me in ${delayMs / 1000}s (attempt ${attempt + 1}/${maxAttempts})...`);
+                  await new Promise((r) => setTimeout(r, delayMs));
                   continue;
                 }
                 console.warn("AuthContext: Failed to fetch user profile (keeping token):", meError?.message || meError);
@@ -174,11 +177,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const login = async (email: string, password: string) => {
     console.log("AuthContext: Starting login...");
     await apiConfigReady;
+    wakeUpBackend(); // ensure wake-up was sent (e.g. if app opened straight to login)
     const isTimeoutOrNetwork = (e: any) =>
       e?.code === "TIMEOUT" || e?.statusCode === 408 ||
       (e?.message && /timeout|network|connection|fetch/i.test(e?.message || ""));
     let lastError: any;
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    const maxAttempts = 3; // 3rd attempt after 15s for Render cold start
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         const res = await api.login({ email, password });
         lastError = null;
@@ -218,9 +223,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return;
     } catch (error: any) {
       lastError = error;
-      if (attempt === 1 && isTimeoutOrNetwork(error)) {
-        console.log("AuthContext: Login timeout/network error, retrying in 2s...");
-        await new Promise((r) => setTimeout(r, 2000));
+      if (attempt < maxAttempts && isTimeoutOrNetwork(error)) {
+        const delayMs = attempt === 1 ? 2000 : 15000; // 2s then 15s (cold start)
+        console.log(`AuthContext: Login timeout/network, retrying in ${delayMs / 1000}s (attempt ${attempt + 1}/${maxAttempts})...`);
+        await new Promise((r) => setTimeout(r, delayMs));
         continue;
       }
       break;

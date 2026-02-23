@@ -68,6 +68,19 @@ export async function checkBackendConnection(urlOverride?: string | null): Promi
   }
 }
 
+/** Fire-and-forget: hit /health to wake Render (free tier spins down after ~15 min). Call once on app start. */
+let _wakeUpDone = false;
+export function wakeUpBackend(): void {
+  if (_wakeUpDone || !currentBaseUrl || !currentBaseUrl.trim()) return;
+  _wakeUpDone = true;
+  const url = `${currentBaseUrl.replace(/\/$/, '')}/health`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 70000);
+  fetch(url, { method: 'GET', signal: controller.signal })
+    .then(() => { clearTimeout(timeoutId); })
+    .catch(() => { clearTimeout(timeoutId); });
+}
+
 /**
  * Set or clear backend URL override. Use when your machine's IP changes so the app
  * can reach the backend without rebuilding. Pass null or '' to use default again.
@@ -88,6 +101,7 @@ export async function setApiBaseUrlOverride(url: string | null): Promise<void> {
       console.log(`[API] Override set to: ${currentBaseUrl}`);
     }
   }
+  _wakeUpDone = false; // allow wake-up for new URL next time app uses API
 }
 
 // ── Global Request Deduplication Lock ────────────────────────────────────────
@@ -354,9 +368,11 @@ async function request<T>(
       }
     }
 
-    // Handle abort/timeout
+    // Handle abort/timeout (common when Render free tier is cold-starting after idle)
     if (error.name === 'AbortError') {
-      const timeoutError: any = new Error('Request timeout. Please check your internet connection and try again.');
+      const timeoutError: any = new Error(
+        'Request timed out. The server may be starting up after idle. Please wait a moment and try again.'
+      );
       timeoutError.code = 'TIMEOUT';
       timeoutError.statusCode = 408;
       logNetworkFailure(`Request timeout for ${path}`, timeoutError, `${currentBaseUrl}${path}`);
