@@ -205,11 +205,12 @@ const NotificationsScreen = ({ navigation }: any) => {
 
   const renderNotificationItem = (item: any) => {
     const type = item.type || 'update';
-    const bookingStatus = item.data?.booking_status ?? item.data?.status ?? '';
-    const isAccepted = type === 'booking' && ['accepted', 'confirmed', 'in_progress', 'completed'].includes(String(bookingStatus).toLowerCase());
-    const isDeclined = type === 'booking' && String(bookingStatus).toLowerCase() === 'cancelled';
-    const title = isAccepted ? 'Accepted' : isDeclined ? 'Declined' : (item.title || 'Notification');
-    const content = isAccepted ? 'You accepted this booking request.' : isDeclined ? 'You declined this booking request.' : (item.message || item.body || item.content || '');
+    const bookingStatus = String(item.data?.booking_status ?? item.data?.status ?? '').toLowerCase();
+    // Only override for caregiver's own accept/decline (DB title was updated by backend)
+    const isCaregiverAccepted = type === 'booking' && (item.title === 'Accepted' || item.title === 'Booking Accepted');
+    const isCaregiverDeclined = type === 'booking' && (item.title === 'Declined' || item.title === 'Booking Declined');
+    const title = isCaregiverAccepted ? 'Accepted' : isCaregiverDeclined ? 'Declined' : (item.title || 'Notification');
+    const content = isCaregiverAccepted ? 'You accepted this booking request.' : isCaregiverDeclined ? 'You declined this booking request.' : (item.message || item.body || item.content || '');
     const createdAt = item.created_at || item.time;
     const isUnread = item.is_read === false || item.unread;
 
@@ -405,9 +406,15 @@ const NotificationsScreen = ({ navigation }: any) => {
           return true; // All
         });
 
+        const sectionTitles: Record<string, string> = {
+          All: 'All notifications',
+          Requests: 'Requests',
+          Updates: 'Updates',
+          Messages: 'Messages',
+        };
         return (
           <ScrollView style={styles.scrollView} contentContainerStyle={styles.listContent}>
-            <Text style={styles.sectionHeader}>{activeTab.toUpperCase()}</Text>
+            <Text style={styles.sectionHeader}>{sectionTitles[activeTab] || activeTab}</Text>
             {filtered.map(renderNotificationItem)}
           </ScrollView>
         );

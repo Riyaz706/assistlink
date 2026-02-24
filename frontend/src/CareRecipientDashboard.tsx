@@ -27,6 +27,7 @@ import { useAuth } from './context/AuthContext';
 import { api } from './api/client';
 import { useErrorHandler } from './hooks/useErrorHandler';
 import { colors } from './theme';
+import { getServiceTypeLabel } from './constants/labels';
 
 // --- TYPES ---
 import { useNavigation, NavigationProp } from '@react-navigation/native';
@@ -57,15 +58,17 @@ const RED = "#EF4444";
 function getBookingStatusDisplay(status: string): { label: string; color: string } {
   const map: Record<string, { label: string; color: string }> = {
     requested: { label: 'Request sent', color: '#6B7280' },
-    pending: { label: 'Pending', color: '#F59E0B' },
-    accepted: { label: 'Scheduled', color: '#2563EB' },
+    pending: { label: 'Awaiting response', color: '#F59E0B' },
+    accepted: { label: 'Accepted', color: '#2563EB' },
     confirmed: { label: 'Confirmed', color: '#059669' },
     in_progress: { label: 'In progress', color: '#059669' },
     completed: { label: 'Completed', color: '#6B7280' },
     cancelled: { label: 'Cancelled', color: '#DC2626' },
+    rejected: { label: 'Declined', color: '#DC2626' },
+    declined: { label: 'Declined', color: '#DC2626' },
     missed: { label: 'Missed', color: '#DC2626' },
   };
-  return map[status] || { label: status, color: '#6B7280' };
+  return map[(status || '').toLowerCase()] || { label: (status || 'Unknown').replace(/_/g, ' '), color: '#6B7280' };
 }
 const SWIPE_HEIGHT = 56;
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -621,14 +624,7 @@ const CareRecipientDashboard = () => {
         ) : currentBookings.length > 0 ? (
           currentBookings.map((booking: any) => {
             const caregiver = booking.caregiver || {};
-            const serviceTypeMap: Record<string, string> = {
-              'exam_assistance': 'Exam Assistance',
-              'daily_care': 'Daily Care',
-              'one_time': 'One Time',
-              'recurring': 'Recurring',
-              'video_call_session': 'Video Call',
-            };
-            const serviceType = serviceTypeMap[booking.service_type] || booking.service_type;
+            const serviceType = getServiceTypeLabel(booking.service_type);
             const scheduledDate = booking.scheduled_date ? new Date(booking.scheduled_date) : new Date();
             const timeStr = scheduledDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
             const dateStr = scheduledDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });

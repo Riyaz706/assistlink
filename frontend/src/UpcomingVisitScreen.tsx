@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import BottomNav from './BottomNav';
 import { api } from './api/client';
 import { useErrorHandler, ErrorDetails } from './hooks/useErrorHandler';
+import { getServiceTypeLabel } from './constants/labels';
 
 const { width } = Dimensions.get('window');
 const GREEN = "#059669";
@@ -200,7 +201,7 @@ const UpcomingVisitScreen = () => {
                 <View style={styles.ratingRow}>
                   <Icon name="star" size={14} color="#FBBF24" />
                   <Text style={styles.ratingText}>
-                    {booking.caregiver?.rating || "5.0"} • {booking.service_type.replace('_', ' ')}
+                    {booking.caregiver?.rating || "5.0"} • {getServiceTypeLabel(booking.service_type)}
                   </Text>
                 </View>
               </View>

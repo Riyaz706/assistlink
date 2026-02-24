@@ -380,7 +380,7 @@ async def update_notifications_booking_status(
     If user_ids is provided, only those users' notifications are considered.
     """
     try:
-        query = supabase_admin.table("notifications").select("id, data, title").eq("type", "booking")
+        query = supabase_admin.table("notifications").select("id, data, title, message").eq("type", "booking")
         if user_ids:
             query = query.in_("user_id", [str(u) for u in user_ids])
         res = query.execute()
@@ -388,32 +388,52 @@ async def update_notifications_booking_status(
             data = row.get("data") or {}
             if not isinstance(data, dict) or str(data.get("booking_id")) != str(booking_id):
                 continue
-            merged = {**data, "booking_status": new_status}
+            merged = {**data, "booking_status": new_status, "status": new_status}
             update_payload = {"data": merged}
-            # Mark as accepted/declined in title and message so UI shows "Accepted" after accept
+            # Mark as accepted/declined in title and message so UI shows correct info
             if new_status == "accepted":
                 update_payload["title"] = "Accepted"
                 update_payload["message"] = "You accepted this booking request."
-            elif new_status == "cancelled":
+            elif new_status in ("cancelled", "declined", "rejected"):
                 update_payload["title"] = "Declined"
                 update_payload["message"] = "You declined this booking request."
+            elif new_status == "confirmed":
+                update_payload["title"] = "Booking Confirmed"
+                update_payload["message"] = "Payment received. Booking is confirmed."
+            elif new_status == "completed":
+                update_payload["title"] = "Booking Completed"
+                update_payload["message"] = "This booking has been completed."
             supabase_admin.table("notifications").update(update_payload).eq("id", row["id"]).execute()
     except Exception as e:
         import sys
         print(f"[WARN] update_notifications_booking_status failed: {e}", file=sys.stderr, flush=True)
 
 
-async def notify_booking_status_change(user_id: str, booking_id: str, status: str, other_party_name: str):
-    """Notify user about booking status change"""
+async def notify_booking_status_change(
+    user_id: str,
+    booking_id: str,
+    status: str,
+    other_party_name: str,
+    *,
+    is_caregiver_rejection: bool = False,
+):
+    """Notify user about booking status change.
+    When caregiver rejects a request, status is 'cancelled' but we show 'declined' message.
+    Pass is_caregiver_rejection=True in that case.
+    """
     status_messages = {
         "accepted": "has accepted your booking",
         "declined": "has declined your booking",
         "cancelled": "has cancelled the booking",
+        "confirmed": "booking has been confirmed",
         "in_progress": "booking has started",
         "completed": "booking has been completed"
     }
-    
-    message = status_messages.get(status, f"booking status changed to {status}")
+    message = (
+        status_messages["declined"]
+        if is_caregiver_rejection
+        else status_messages.get(status, f"booking status changed to {status}")
+    )
     
     return await create_notification(
         user_id=user_id,

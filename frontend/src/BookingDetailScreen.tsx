@@ -16,44 +16,51 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { api } from './api/client';
 import { useAuth } from './context/AuthContext';
 import BottomNav from './BottomNav';
+import { getServiceTypeLabel, getBookingStatusLabel, SECTION_LABELS, FIELD_LABELS } from './constants/labels';
 
 const TIMELINE_BLUE = '#007AFF';
 const TIMELINE_GREEN = '#22C55E';
 const TIMELINE_RED = '#DC2626';
+/** Human-friendly status label for timeline */
+const formatTimelineStatus = (status: string): string => getBookingStatusLabel(status) || 'Status update';
+
 const StatusTimeline = ({ history }: { history: any[] }) => {
     if (!history || history.length === 0) return null;
 
     const TIMELINE_GREY = '#9CA3AF';
     const getDotColor = (entry: any) => {
-        const status = (entry.new_status || '').toLowerCase();
+        const status = (entry.new_status || entry.previous_status || '').toLowerCase();
         if (status === 'requested' || status === 'completed') return TIMELINE_BLUE;
         if (status === 'accepted' || status === 'confirmed' || status === 'in_progress') return TIMELINE_GREEN;
-        if (status === 'cancelled' || status === 'rejected') return TIMELINE_RED;
+        if (status === 'cancelled' || status === 'rejected' || status === 'declined') return TIMELINE_RED;
         if (status === 'pending') return TIMELINE_GREY;
         return TIMELINE_GREY;
     };
 
     return (
         <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Timeline</Text>
+            <Text style={styles.sectionTitle}>{SECTION_LABELS.BOOKING_TIMELINE}</Text>
             <View style={styles.timeline}>
-                {history.map((entry, index) => (
-                    <View key={entry.id} style={styles.timelineItem}>
-                        <View style={[styles.timelineDot, { backgroundColor: getDotColor(entry) }]} />
-                        {index !== history.length - 1 && <View style={styles.timelineLine} />}
-                        <View style={styles.timelineContent}>
-                            <Text style={[styles.timelineStatus, { color: getDotColor(entry) }]}>
-                                {entry.new_status.toUpperCase().replace('_', ' ')}
-                            </Text>
-                            <Text style={styles.timelineDate}>
-                                {new Date(entry.created_at).toLocaleString()}
-                            </Text>
-                            {entry.reason && (
-                                <Text style={styles.timelineReason}>Note: {entry.reason}</Text>
-                            )}
+                {history.map((entry, index) => {
+                    const displayStatus = entry.new_status || entry.previous_status || 'Update';
+                    return (
+                        <View key={entry.id || index} style={styles.timelineItem}>
+                            <View style={[styles.timelineDot, { backgroundColor: getDotColor(entry) }]} />
+                            {index !== history.length - 1 && <View style={styles.timelineLine} />}
+                            <View style={styles.timelineContent}>
+                                <Text style={[styles.timelineStatus, { color: getDotColor(entry) }]}>
+                                    {formatTimelineStatus(displayStatus)}
+                                </Text>
+                                <Text style={styles.timelineDate}>
+                                    {entry.created_at ? new Date(entry.created_at).toLocaleString() : ''}
+                                </Text>
+                                {entry.reason && (
+                                    <Text style={styles.timelineReason}>Note: {entry.reason}</Text>
+                                )}
+                            </View>
                         </View>
-                    </View>
-                ))}
+                    );
+                })}
             </View>
         </View>
     );
@@ -342,44 +349,46 @@ const BookingDetailScreen = () => {
                 <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
 
                 <View style={styles.statusBanner}>
-                    <Text style={styles.statusLabel}>Status</Text>
+                    <Text style={styles.statusLabel}>{SECTION_LABELS.STATUS}</Text>
                     <Text style={[styles.statusValue, { color: getStatusColor(booking.status) }]}>
-                        {booking.status.toUpperCase().replace('_', ' ')}
+                        {formatTimelineStatus(booking.status)}
                     </Text>
                 </View>
 
                 <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Service Details</Text>
-                    {booking.care_recipient && <DetailRow label="Recipient" value={booking.care_recipient.full_name} />}
-                    {booking.caregiver && <DetailRow label="Caregiver" value={booking.caregiver.full_name} />}
-                    <DetailRow label="Type" value={booking.service_type} />
-                    <DetailRow label="Date" value={new Date(booking.scheduled_date).toLocaleString()} />
-                    <DetailRow label="Duration" value={`${booking.duration_hours} hours`} />
+                    <Text style={styles.sectionTitle}>{SECTION_LABELS.SERVICE_DETAILS}</Text>
+                    {booking.care_recipient?.full_name && <DetailRow label={FIELD_LABELS.CARE_RECIPIENT} value={booking.care_recipient.full_name} />}
+                    {booking.caregiver?.full_name && <DetailRow label={FIELD_LABELS.CAREGIVER} value={booking.caregiver.full_name} />}
+                    <DetailRow label={FIELD_LABELS.SERVICE_TYPE} value={getServiceTypeLabel(booking.service_type)} />
+                    <DetailRow label={FIELD_LABELS.DATE_TIME} value={booking.scheduled_date ? new Date(booking.scheduled_date).toLocaleString() : FIELD_LABELS.NOT_SET} />
+                    <DetailRow label={FIELD_LABELS.DURATION} value={`${booking.duration_hours ?? 0} hours`} />
                     {booking.location && (
                         <DetailRow
-                            label="Location"
+                            label={FIELD_LABELS.LOCATION}
                             value={
                                 typeof booking.location === 'string'
                                     ? booking.location
-                                    : (booking.location.address || booking.location.text || 'Map Location')
+                                    : (booking.location.address || booking.location.text || FIELD_LABELS.NO_LOCATION)
                             }
                         />
                     )}
-                    {booking.specific_requirements && <DetailRow label="Requirements" value={booking.specific_requirements} />}
-                    {booking.caregiver_notes && <DetailRow label="Caregiver Notes" value={booking.caregiver_notes} />}
+                    {(booking.specific_needs || booking.specific_requirements) && (
+                        <DetailRow label={FIELD_LABELS.SPECIAL_NEEDS} value={booking.specific_needs || booking.specific_requirements} />
+                    )}
+                    {booking.caregiver_notes && <DetailRow label={FIELD_LABELS.CAREGIVER_NOTES} value={booking.caregiver_notes} />}
                 </View>
 
                 <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Notes</Text>
+                    <Text style={styles.sectionTitle}>{SECTION_LABELS.NOTES}</Text>
                     <TouchableOpacity style={[styles.button, styles.secondaryButton]} onPress={() => setNoteModalVisible(true)}>
-                        <Text style={styles.secondaryButtonText}>Add Note</Text>
+                        <Text style={styles.secondaryButtonText}>{SECTION_LABELS.ADD_NOTE}</Text>
                     </TouchableOpacity>
                 </View>
 
                 {review && (
                     <View style={[styles.section, styles.reviewLockedSection]}>
                         <View style={styles.reviewLockedHeader}>
-                            <Text style={styles.sectionTitle}>Your Rating</Text>
+                            <Text style={styles.sectionTitle}>{SECTION_LABELS.YOUR_RATING}</Text>
                             <View style={styles.lockedBadge}>
                                 <Ionicons name="lock-closed" size={14} color="#64748B" />
                                 <Text style={styles.lockedBadgeText}>Locked</Text>
@@ -508,11 +517,17 @@ const DetailRow = ({ label, value }: { label: string, value: string }) => (
 );
 
 const getStatusColor = (status: string) => {
-    switch (status) {
-        case 'requested': return '#FF9500';
+    const s = (status || '').toLowerCase();
+    switch (s) {
+        case 'requested':
+        case 'pending': return '#FF9500';
         case 'accepted': return '#007AFF';
         case 'confirmed': return '#34C759';
-        case 'cancelled': return '#FF3B30';
+        case 'in_progress': return '#AF52DE';
+        case 'completed': return '#8E8E93';
+        case 'cancelled':
+        case 'rejected':
+        case 'declined': return '#FF3B30';
         default: return '#333';
     }
 };

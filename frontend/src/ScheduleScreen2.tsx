@@ -18,6 +18,7 @@ import { api } from './api/client';
 import { useAuth } from './context/AuthContext';
 import { useErrorHandler } from './hooks/useErrorHandler';
 import BottomNav from './BottomNav';
+import { getServiceTypeLabel } from './constants/labels';
 
 const THEME = {
   primary: '#059669',
@@ -25,14 +26,6 @@ const THEME = {
   card: '#FFFFFF',
   text: '#111827',
   subText: '#6B7280',
-};
-
-const SERVICE_LABELS: Record<string, string> = {
-  exam_assistance: 'Exam Assistance',
-  daily_care: 'Daily Care',
-  one_time: 'One Time',
-  recurring: 'Recurring',
-  video_call_session: 'Video Call',
 };
 
 export default function ScheduleScreen2({ navigation }: any) {
@@ -271,7 +264,7 @@ export default function ScheduleScreen2({ navigation }: any) {
     const careRecipient = normalizeCareRecipient(item.care_recipient);
 
     if (type === 'booking') {
-      const serviceLabel = SERVICE_LABELS[item.service_type] || item.service_type || 'Booking';
+      const serviceLabel = getServiceTypeLabel(item.service_type) || 'Booking';
       const dateTime = item.scheduled_date ? formatTime(item.scheduled_date) : 'Date not set';
       const isRequest = (item.status || '').toLowerCase() === 'requested';
       return (

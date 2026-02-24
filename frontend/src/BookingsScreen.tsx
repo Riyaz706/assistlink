@@ -15,13 +15,16 @@ import { api } from './api/client';
 import { LoadingState } from './components/LoadingState';
 import { EmptyState } from './components/EmptyState';
 import BottomNav from './BottomNav';
+import { getServiceTypeLabel, getBookingStatusLabel, ROLE_LABELS } from './constants/labels';
 
 const StatusBadge = ({ status }: { status: string }) => {
     let color = '#666';
     let bgColor = '#f0f0f0';
+    const s = (status || '').toLowerCase();
 
-    switch (status) {
+    switch (s) {
         case 'requested':
+        case 'pending':
             color = '#FF9500'; // Orange
             bgColor = '#FFF5E5';
             break;
@@ -43,6 +46,7 @@ const StatusBadge = ({ status }: { status: string }) => {
             break;
         case 'cancelled':
         case 'rejected':
+        case 'declined':
             color = '#FF3B30'; // Red
             bgColor = '#FFE5E5';
             break;
@@ -51,38 +55,41 @@ const StatusBadge = ({ status }: { status: string }) => {
     return (
         <View style={[styles.badge, { backgroundColor: bgColor }]}>
             <Text style={[styles.badgeText, { color }]}>
-                {status.toUpperCase().replace('_', ' ')}
+                {getBookingStatusLabel(status || 'requested')}
             </Text>
         </View>
     );
 };
 
 const BookingItem = ({ item, onPress }: { item: any; onPress: () => void }) => {
-    const date = new Date(item.scheduled_date).toLocaleDateString();
-    const time = new Date(item.scheduled_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const date = item.scheduled_date ? new Date(item.scheduled_date).toLocaleDateString() : '—';
+    const time = item.scheduled_date ? new Date(item.scheduled_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    const serviceLabel = getServiceTypeLabel(item.service_type);
+    const partnerName = item.caregiver?.full_name || item.care_recipient?.full_name;
+    const roleLabel = item.caregiver ? ROLE_LABELS.CAREGIVER : ROLE_LABELS.CARE_RECIPIENT;
 
     return (
         <TouchableOpacity style={styles.card} onPress={onPress}>
             <View style={styles.cardHeader}>
-                <Text style={styles.serviceType}>
-                    {item.service_type.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
-                </Text>
-                <StatusBadge status={item.status} />
+                <Text style={styles.serviceType}>{serviceLabel}</Text>
+                <StatusBadge status={item.status || 'requested'} />
             </View>
 
             <View style={styles.cardBody}>
                 <View style={styles.row}>
                     <Ionicons name="calendar-outline" size={16} color="#666" />
-                    <Text style={styles.rowText}>{date} • {time}</Text>
+                    <Text style={styles.rowText}>{date}{time ? ` • ${time}` : ''}</Text>
                 </View>
                 <View style={styles.row}>
                     <Ionicons name="time-outline" size={16} color="#666" />
-                    <Text style={styles.rowText}>{item.duration_hours} hours</Text>
+                    <Text style={styles.rowText}>{item.duration_hours ?? 0} hours</Text>
                 </View>
-                {item.caregiver_id && (
+                {(item.caregiver_id || item.care_recipient_id) && (
                     <View style={styles.row}>
                         <Ionicons name="person-outline" size={16} color="#666" />
-                        <Text style={styles.rowText}>Caregiver Assigned</Text>
+                        <Text style={styles.rowText}>
+                            {partnerName ? `${roleLabel}: ${partnerName}` : ROLE_LABELS.ASSIGNED}
+                        </Text>
                     </View>
                 )}
             </View>
@@ -179,8 +186,8 @@ const BookingsScreen = () => {
                         <EmptyState
                             icon="calendar-outline"
                             title="No bookings yet"
-                            message="Create a request to get matched with a caregiver."
-                            actionLabel="Create a booking"
+                            message="Create a request to find and book a caregiver."
+                            actionLabel="Create new booking"
                             onAction={() => navigation.navigate('NewRequestScreen')}
                         />
                     }

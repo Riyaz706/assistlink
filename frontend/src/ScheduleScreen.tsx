@@ -8,6 +8,7 @@ import { useErrorHandler } from './hooks/useErrorHandler';
 import { api } from './api/client';
 import { useAuth } from './context/AuthContext';
 import BottomNav from './BottomNav';
+import { getServiceTypeLabel } from './constants/labels';
 
 const THEME = {
   primary: "#059669",
@@ -230,12 +231,7 @@ export default function ScheduleScreen({ navigation, route }: any) {
         {item.service_type && (
           <View style={styles.detailRow}>
             <Icon name="briefcase" size={16} color={THEME.subText} />
-            <Text style={styles.detailText}>
-              {item.service_type === 'exam_assistance' ? 'Exam Assistance' :
-                item.service_type === 'daily_care' ? 'Daily Care' :
-                  item.service_type === 'emergency' ? 'Emergency' :
-                    item.service_type}
-            </Text>
+            <Text style={styles.detailText}>{getServiceTypeLabel(item.service_type)}</Text>
           </View>
         )}
         {item.location && (
@@ -292,14 +288,7 @@ export default function ScheduleScreen({ navigation, route }: any) {
     const caregiver = item.caregiver || {};
     const isRequested = (item.status || '').toLowerCase() === 'requested';
 
-    const serviceTypeMap: Record<string, string> = {
-      'exam_assistance': 'Exam Assistance',
-      'daily_care': 'Daily Care',
-      'one_time': 'One Time',
-      'recurring': 'Recurring',
-      'video_call_session': 'Video Call Session',
-    };
-    const serviceType = serviceTypeMap[item.service_type] || item.service_type;
+    const serviceType = getServiceTypeLabel(item.service_type);
 
     const isPending = item.status === 'pending';
 

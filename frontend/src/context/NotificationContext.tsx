@@ -3,6 +3,7 @@ import { Alert, Platform } from 'react-native';
 import { useAuth } from './AuthContext';
 import { api } from '../api/client';
 import * as RootNavigation from '../navigation/RootNavigation';
+import { getServiceTypeLabel } from '../constants/labels';
 import { getSupabase } from '../lib/supabase';
 
 // --- TYPES ---
@@ -86,14 +87,7 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
             const bookingAssignments: Assignment[] = rawBookings.map((booking: any) => {
                 const rawRecipient = booking.care_recipient;
                 const careRecipient = Array.isArray(rawRecipient) ? (rawRecipient[0] || {}) : (rawRecipient || {});
-                const serviceTypeMap: Record<string, string> = {
-                    'exam_assistance': 'Exam Assistance',
-                    'daily_care': 'Daily Care',
-                    'one_time': 'One Time',
-                    'recurring': 'Recurring',
-                    'video_call_session': 'Video Call',
-                };
-                const serviceType = serviceTypeMap[booking.service_type] || booking.service_type || 'Service';
+                const serviceType = getServiceTypeLabel(booking.service_type) || 'Service';
 
                 // Format date and time
                 let timeStr = 'Date not set';

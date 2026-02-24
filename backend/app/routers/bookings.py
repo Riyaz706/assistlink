@@ -1505,7 +1505,8 @@ async def respond_to_booking(
                 user_id=booking["care_recipient_id"],
                 booking_id=booking_id,
                 status=new_status,
-                other_party_name=caregiver_name
+                other_party_name=caregiver_name,
+                is_caregiver_rejection=(new_status == "cancelled"),
             )
         except Exception as e:
             print(f"[WARN] Failed to notify status change: {e}", flush=True)
