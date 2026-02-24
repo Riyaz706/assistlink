@@ -23,10 +23,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import BottomNav from './BottomNav';
+import WeatherWidget from './components/WeatherWidget';
 import { useAuth } from './context/AuthContext';
+import { useTranslation } from 'react-i18next';
 import { api } from './api/client';
 import { useErrorHandler } from './hooks/useErrorHandler';
-import { colors } from './theme';
+import { colors, typography, spacing, layout, borderRadius, shadows } from './theme';
 import { getServiceTypeLabel } from './constants/labels';
 
 // --- TYPES ---
@@ -51,8 +53,8 @@ type RootStackParamList = {
   // add others if needed
 };
 
-const GREEN = "#059669";
-const RED = "#EF4444";
+const GREEN = colors.secondary;
+const RED = colors.error;
 
 /** Human-readable label and color for booking status in Current Status section */
 function getBookingStatusDisplay(status: string): { label: string; color: string } {
@@ -135,8 +137,8 @@ const SosSwipeButton = ({ onSwipeSuccess }: { onSwipeSuccess: () => void }) => {
 
 
 const CareRecipientDashboard = () => {
-  // Use the typed navigation hook
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
+  const { t } = useTranslation();
   const { user, refreshUser, logout } = useAuth();
   const { handleError } = useErrorHandler();
 
@@ -148,6 +150,7 @@ const CareRecipientDashboard = () => {
   const [caretakerName, setCaretakerName] = useState("");
   const [caretakerPhone, setCaretakerPhone] = useState("");
   const [currentBookings, setCurrentBookings] = useState<any[]>([]);
+  const [recentActivity, setRecentActivity] = useState<any[]>([]);
   const [loadingBookings, setLoadingBookings] = useState(false);
   const [unratedBooking, setUnratedBooking] = useState<any>(null);
   const [menuVisible, setMenuVisible] = useState(false);
@@ -214,6 +217,43 @@ const CareRecipientDashboard = () => {
         setUnratedBooking(found);
       } catch {
         setUnratedBooking(null);
+      }
+
+      // Recent activity feed: bookings + chat sessions
+      try {
+        const [allBookingsRes, chatRes] = await Promise.all([
+          api.getDashboardBookings({ limit: 10 }),
+          api.getChatSessions().catch(() => []),
+        ]);
+        const allBookings = (allBookingsRes as any[]) || [];
+        const sessions = (chatRes as any[]) || [];
+        const items: { type: 'booking' | 'chat'; date: Date; label: string; data: any }[] = [];
+        allBookings.slice(0, 5).forEach((b: any) => {
+          const d = b.updated_at || b.scheduled_date || b.created_at;
+          const caregiverName = b.caregiver?.full_name || 'Caregiver';
+          const status = b.status || 'pending';
+          items.push({
+            type: 'booking',
+            date: d ? new Date(d) : new Date(0),
+            label: `${getServiceTypeLabel(b.service_type)} with ${caregiverName} · ${getBookingStatusDisplay(status).label}`,
+            data: b,
+          });
+        });
+        sessions.slice(0, 3).forEach((s: any) => {
+          const other = s.caregiver || s.care_recipient || {};
+          const name = other.full_name || 'User';
+          const d = s.last_message_at || s.created_at;
+          items.push({
+            type: 'chat',
+            date: d ? new Date(d) : new Date(0),
+            label: `Chat with ${name}`,
+            data: s,
+          });
+        });
+        items.sort((a, b) => b.date.getTime() - a.date.getTime());
+        setRecentActivity(items.slice(0, 5));
+      } catch {
+        setRecentActivity([]);
       }
     } catch (e: any) {
       const msg = (e?.message || '').toLowerCase();
@@ -355,7 +395,7 @@ const CareRecipientDashboard = () => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      <StatusBar barStyle="dark-content" backgroundColor="#F6FAF5" />
+      <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
 
       {/* --- SOS CONFIGURATION MODAL --- */}
       <Modal
@@ -450,33 +490,31 @@ const CareRecipientDashboard = () => {
           }
         >
 
-        {/* HEADER - Hamburger (PRD) + Date/Title + Notifications */}
+        {/* HEADER — Clear greeting, date, menu, notifications */}
         <View style={styles.headerRow}>
           <TouchableOpacity
             onPress={() => setMenuVisible(true)}
             style={styles.menuButton}
-            delayPressIn={0}
-            activeOpacity={0.6}
+            activeOpacity={0.7}
             accessibilityLabel="Open menu"
             accessibilityRole="button"
           >
-            <Icon name="menu" size={26} color={colors.textPrimary} />
+            <Icon name="menu" size={28} color={colors.textPrimary} />
           </TouchableOpacity>
           <View style={styles.headerCenter}>
-            <Text style={styles.date}>{currentDate}</Text>
-            <Text style={styles.heading}>
+            <Text style={styles.dateLabel}>{currentDate}</Text>
+            <Text style={styles.greeting}>
               {greeting}, {firstName}
             </Text>
           </View>
           <TouchableOpacity
             style={styles.bell}
             onPress={() => navigation.navigate('Notifications')}
-            delayPressIn={0}
-            activeOpacity={0.6}
+            activeOpacity={0.7}
             accessibilityLabel="View notifications"
             accessibilityRole="button"
           >
-            <Icon name="bell-outline" size={24} color={colors.textPrimary} />
+            <Icon name="bell-outline" size={26} color={colors.textPrimary} />
             <View style={styles.notificationDot} />
           </TouchableOpacity>
         </View>
@@ -518,6 +556,36 @@ const CareRecipientDashboard = () => {
             </View>
           </Pressable>
         </Modal>
+
+        {/* Weather Widget */}
+        <View style={styles.weatherWrap}>
+          <WeatherWidget
+            lat={(user as any)?.address?.latitude ?? 17.385}
+            lng={(user as any)?.address?.longitude ?? 78.4867}
+          />
+        </View>
+
+        {/* Primary Action Cards — Large touch targets, clear hierarchy */}
+        <View style={styles.quickActions}>
+          <TouchableOpacity style={styles.quickActionCard} onPress={() => navigation.navigate('NewRequestScreen')} activeOpacity={0.8}>
+            <View style={[styles.quickActionIcon, { backgroundColor: colors.primaryLight }]}>
+              <Icon name="plus-circle" size={32} color={colors.primary} />
+            </View>
+            <Text style={styles.quickActionLabel}>Request Help</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.quickActionCard} onPress={() => (navigation as any).navigate('Schedule')} activeOpacity={0.8}>
+            <View style={[styles.quickActionIcon, { backgroundColor: colors.secondaryLight }]}>
+              <Icon name="calendar-clock" size={32} color={colors.secondary} />
+            </View>
+            <Text style={styles.quickActionLabel}>Schedule Care</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.quickActionCard} onPress={handleEmergencySwipe} activeOpacity={0.8}>
+            <View style={[styles.quickActionIcon, { backgroundColor: '#FEE2E2' }]}>
+              <Icon name="alert-octagon" size={32} color={colors.error} />
+            </View>
+            <Text style={styles.quickActionLabel}>Emergency</Text>
+          </TouchableOpacity>
+        </View>
 
         {/* PROFILE CARD */}
         <TouchableOpacity
@@ -565,11 +633,69 @@ const CareRecipientDashboard = () => {
           accessibilityRole="button"
         >
           <Icon name="plus" size={22} color="#fff" style={{ marginRight: 8 }} />
-          <Text style={styles.requestText}>Request New Care</Text>
+          <Text style={styles.requestText}>{t('dashboard.requestNewCare')}</Text>
         </TouchableOpacity>
 
         {/* SOS SWIPE BUTTON */}
         <SosSwipeButton onSwipeSuccess={handleEmergencySwipe} />
+
+        {/* ACTIVE CAREGIVER STATUS - PRD */}
+        {currentBookings.some((b: any) => b.status === 'in_progress') && (() => {
+          const activeBooking = currentBookings.find((b: any) => b.status === 'in_progress');
+          const cg = activeBooking?.caregiver || {};
+          return (
+            <View style={styles.activeCaregiverBanner}>
+              <Icon name="account-check" size={24} color={GREEN} />
+              <View style={styles.activeCaregiverTextWrap}>
+                <Text style={styles.activeCaregiverLabel}>{t('dashboard.activeCaregiver')}</Text>
+                <Text style={styles.activeCaregiverName}>{cg.full_name || 'Caregiver'} · {t('dashboard.visitInProgress')}</Text>
+              </View>
+            </View>
+          );
+        })()}
+
+        {/* RECENT ACTIVITY FEED - PRD */}
+        <View style={styles.recentActivitySection}>
+          <Text style={styles.sectionTitle}>{t('dashboard.recentActivity')}</Text>
+          {recentActivity.length > 0 ? (
+            <View style={styles.recentActivityCard}>
+              {recentActivity.map((item, i) => (
+                <TouchableOpacity
+                  key={`${item.type}-${i}`}
+                  style={[styles.recentActivityItem, i < recentActivity.length - 1 && styles.recentActivityBorder]}
+                  onPress={() => {
+                    if (item.type === 'booking' && item.data?.id) {
+                      (navigation as any).navigate('BookingDetailScreen', { bookingId: item.data.id });
+                    } else if (item.type === 'chat' && item.data?.id) {
+                      const other = item.data.caregiver || item.data.care_recipient || {};
+                      (navigation as any).navigate('ChatDetailsScreen', {
+                        chatSessionId: item.data.id,
+                        otherPartyName: other.full_name || 'User',
+                        otherPartyAvatar: other.profile_photo_url,
+                      });
+                    }
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Icon
+                    name={item.type === 'booking' ? 'calendar-check' : 'message-text'}
+                    size={20}
+                    color={item.type === 'booking' ? GREEN : colors.primary}
+                    style={styles.recentActivityIcon}
+                  />
+                  <Text style={styles.recentActivityLabel} numberOfLines={2}>{item.label}</Text>
+                  <Text style={styles.recentActivityDate}>
+                    {item.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          ) : (
+            <View style={styles.recentActivityCard}>
+              <Text style={styles.recentActivityEmpty}>{t('dashboard.noRecentActivity')}</Text>
+            </View>
+          )}
+        </View>
 
         {/* RATE YOUR CAREGIVER PROMPT */}
         {unratedBooking && (
@@ -727,16 +853,24 @@ const CareRecipientDashboard = () => {
 export default CareRecipientDashboard;
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F6FAF5" },
+  container: { flex: 1, backgroundColor: colors.background },
   contentWrap: { flex: 1 },
   scrollView: { flex: 1 },
-  scrollContent: { paddingBottom: 100 },
+  scrollContent: { paddingBottom: 120, paddingHorizontal: layout.screenPadding },
 
   // --- SWIPE BUTTON STYLES ---
   swipeContainer: {
-    height: SWIPE_HEIGHT, backgroundColor: RED, borderRadius: SWIPE_HEIGHT / 2,
-    marginHorizontal: 16, marginBottom: 24, justifyContent: 'center', padding: 4,
-    shadowColor: RED, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4,
+    height: SWIPE_HEIGHT,
+    backgroundColor: colors.error,
+    borderRadius: SWIPE_HEIGHT / 2,
+    marginBottom: layout.sectionGap,
+    justifyContent: 'center',
+    padding: 4,
+    shadowColor: colors.error,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 4,
     overflow: 'hidden',
   },
   swipeTextContainer: { position: 'absolute', width: '100%', alignItems: 'center', justifyContent: 'center', zIndex: 0 },
@@ -770,23 +904,30 @@ const styles = StyleSheet.create({
   confirmBtn: { backgroundColor: GREEN, paddingVertical: 14, borderRadius: 14, alignItems: 'center', marginTop: 8, shadowColor: GREEN, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 5, elevation: 4 },
   confirmBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
 
-  // --- GENERAL STYLES ---
+  // --- HEADER ---
   headerRow: {
-    flexDirection: "row", justifyContent: "space-between", alignItems: "center",
-    marginBottom: 12,
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    marginTop: 0,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: layout.sectionGap,
+    paddingTop: spacing.sm,
   },
-  menuButton: { padding: 12, marginRight: 8, minWidth: 44, minHeight: 44, justifyContent: 'center', alignItems: 'center' },
-  headerCenter: { flex: 1 },
-  date: { color: GREEN, fontSize: 14, fontWeight: "600", letterSpacing: 1 },
-  heading: { fontSize: 26, fontWeight: "700", color: '#1A1A1A' },
+  menuButton: { minWidth: 48, minHeight: 48, justifyContent: 'center', alignItems: 'center' },
+  headerCenter: { flex: 1, marginHorizontal: spacing.md },
+  dateLabel: { color: colors.textSecondary, fontSize: typography.bodySmall, fontWeight: typography.weightSemiBold, letterSpacing: 0.5 },
+  greeting: { fontSize: typography.headingLarge, fontWeight: typography.weightBold, color: colors.textPrimary, marginTop: 2 },
   bell: {
-    backgroundColor: "#fff", padding: 10, borderRadius: 12,
-    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4,
+    backgroundColor: colors.card,
+    padding: 12,
+    borderRadius: borderRadius.md,
+    minWidth: 48,
+    minHeight: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+    ...shadows.card,
   },
-  notificationDot: { position: 'absolute', top: 10, right: 10, width: 8, height: 8, borderRadius: 4, backgroundColor: 'red', borderWidth: 1, borderColor: '#fff' },
+  notificationDot: { position: 'absolute', top: 10, right: 10, width: 8, height: 8, borderRadius: 4, backgroundColor: colors.error, borderWidth: 1.5, borderColor: colors.card },
+  weatherWrap: { marginBottom: layout.cardGap },
   menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-start', alignItems: 'flex-end', paddingTop: 60, paddingRight: 16 },
   menuPanel: { backgroundColor: '#fff', borderRadius: 16, minWidth: 260, maxWidth: '100%', marginHorizontal: 16, paddingVertical: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 8 },
   menuHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
@@ -796,12 +937,45 @@ const styles = StyleSheet.create({
   menuItemLogout: { borderTopWidth: 1, borderTopColor: '#E5E7EB', marginTop: 4 },
   menuItemTextLogout: { fontSize: 16, color: colors.error, fontWeight: '600' },
 
-  // Updated Profile Card to be touchable and consistent
+  quickActions: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: layout.cardGap,
+    marginBottom: layout.sectionGap,
+  },
+  quickActionCard: {
+    flex: 1,
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.lg,
+    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.sm,
+    alignItems: "center",
+    minHeight: 100,
+    ...shadows.card,
+  },
+  quickActionIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.sm,
+  },
+  quickActionLabel: {
+    fontSize: typography.bodySmall,
+    color: colors.textPrimary,
+    fontWeight: typography.weightSemiBold,
+    textAlign: 'center',
+  },
   profileCard: {
-    backgroundColor: "#fff", borderRadius: 18, padding: 16,
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    marginBottom: 20, marginHorizontal: 16,
-    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: layout.sectionGap,
+    ...shadows.card,
   },
   profileLeft: { flexDirection: "row", alignItems: "center" },
   avatarWrapper: { marginRight: 12 },
@@ -822,12 +996,17 @@ const styles = StyleSheet.create({
   link: { color: GREEN, fontSize: 14, fontWeight: "600" },
 
   requestBtn: {
-    backgroundColor: GREEN, paddingVertical: 16, borderRadius: 18,
-    flexDirection: 'row', alignItems: "center", justifyContent: 'center',
-    marginBottom: 12, marginHorizontal: 16,
-    shadowColor: GREEN, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4,
+    backgroundColor: colors.secondary,
+    paddingVertical: 18,
+    borderRadius: borderRadius.lg,
+    flexDirection: 'row',
+    alignItems: "center",
+    justifyContent: 'center',
+    marginBottom: layout.cardGap,
+    minHeight: 56,
+    ...shadows.button,
   },
-  requestText: { fontSize: 16, fontWeight: "700", color: '#fff' },
+  requestText: { fontSize: typography.body, fontWeight: typography.weightBold, color: colors.card },
 
   servicesRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 24, paddingHorizontal: 16 },
   serviceItem: { alignItems: "center", width: "23%" },
@@ -837,22 +1016,47 @@ const styles = StyleSheet.create({
     shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2,
   },
   serviceText: { fontSize: 12, fontWeight: '500', color: '#1A1A1A' },
-  sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: 'center', marginBottom: 12, paddingHorizontal: 16 },
-  sectionTitle: { fontSize: 18, fontWeight: "700", color: '#1A1A1A' },
-  statusSummaryWrap: { paddingHorizontal: 16, marginBottom: 12 },
+  sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: 'center', marginBottom: layout.cardGap },
+  sectionTitle: { fontSize: typography.headingSmall, fontWeight: typography.weightBold, color: colors.textPrimary },
+  activeCaregiverBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.secondaryLight,
+    padding: spacing.lg,
+    borderRadius: borderRadius.lg,
+    marginBottom: layout.cardGap,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  activeCaregiverTextWrap: { marginLeft: 12, flex: 1 },
+  activeCaregiverLabel: { fontSize: 12, color: '#6B7280', textTransform: 'uppercase', letterSpacing: 0.5 },
+  activeCaregiverName: { fontSize: 16, fontWeight: '600', color: '#059669' },
+  recentActivitySection: { marginBottom: layout.sectionGap },
+  recentActivityCard: {
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    ...shadows.card,
+  },
+  recentActivityItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12 },
+  recentActivityBorder: { borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  recentActivityIcon: { marginRight: 12 },
+  recentActivityLabel: { flex: 1, fontSize: 14, color: '#1A1A1A', fontWeight: '500' },
+  recentActivityDate: { fontSize: 12, color: '#6B7280' },
+  recentActivityEmpty: { fontSize: 14, color: '#9CA3AF', textAlign: 'center', paddingVertical: 16 },
+  statusSummaryWrap: { marginBottom: layout.cardGap },
   statusSummaryText: { fontSize: 14, color: '#6B7280', fontWeight: '500' },
 
   rateCard: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#FFFBEB',
+    backgroundColor: colors.accentLight,
     borderWidth: 1,
     borderColor: '#FDE68A',
-    borderRadius: 16,
-    padding: 16,
-    marginHorizontal: 16,
-    marginBottom: 20,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    marginBottom: layout.sectionGap,
   },
   rateCardLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   rateCardTitle: { fontSize: 16, fontWeight: '700', color: '#1A1A1A' },
@@ -860,9 +1064,12 @@ const styles = StyleSheet.create({
   rateCardBtn: { fontSize: 15, fontWeight: '700', color: GREEN, marginLeft: 8 },
 
   visitCard: {
-    backgroundColor: "#fff", borderRadius: 18, padding: 12,
-    flexDirection: "row", marginBottom: 24, marginHorizontal: 16,
-    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2,
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    flexDirection: "row",
+    marginBottom: layout.sectionGap,
+    ...shadows.card,
   },
   mapBox: { width: 90, height: 90, borderRadius: 16, backgroundColor: "#DDEFE3", marginRight: 12, justifyContent: 'center', alignItems: 'center' },
   visitTitleRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 2 },

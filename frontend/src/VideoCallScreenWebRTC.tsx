@@ -153,7 +153,7 @@ export default function VideoCallScreenWebRTC() {
             </Text>
             <Text style={styles.errorMessage}>{errorMessage}</Text>
             <View style={styles.errorActions}>
-              {error === 'permission_denied' && (
+              {(error === 'permission_denied' || error === 'signaling' || error === 'config') && (
                 <TouchableOpacity style={styles.primaryButton} onPress={retry} accessibilityRole="button" accessibilityLabel="Try again">
                   <Text style={styles.primaryButtonText}>Try again</Text>
                 </TouchableOpacity>

@@ -87,16 +87,34 @@ async def register(request: Request, user_data: UserCreate):
         raise DatabaseError(f"Registration failed: {str(e)}")
 
 
+def _resolve_login_email(credentials: "LoginRequest") -> str:
+    """Resolve email from credentials - PRD: support email or phone login."""
+    if credentials.email:
+        return credentials.email.strip()
+    if credentials.phone:
+        phone = credentials.phone.strip()
+        if not phone.startswith("+"):
+            phone = f"+91{phone}" if len(phone) == 10 else phone
+        res = supabase_admin.table("users").select("email").eq("phone", phone).limit(1).execute()
+        if res.data and len(res.data) > 0:
+            return res.data[0]["email"]
+        raise AuthenticationError("No account found with this phone number.")
+    raise AuthenticationError("Please enter email or phone number.")
+
+
 @router.post("/login", response_model=dict)
 @limiter.limit("5/minute")
 async def login(request: Request, credentials: LoginRequest):
-    """Login user and get access token"""
+    """Login user and get access token - supports email or phone per PRD."""
+    if not credentials.email and not credentials.phone:
+        raise AuthenticationError("Please enter email or phone number.")
     try:
+        login_email = _resolve_login_email(credentials)
         response = supabase.auth.sign_in_with_password({
-            "email": credentials.email,
+            "email": login_email,
             "password": credentials.password
         })
-        sys.stderr.write(f"[{request.state.request_id}] Supabase login successful for {credentials.email}\n")
+        sys.stderr.write(f"[{request.state.request_id}] Supabase login successful for {login_email}\n")
         sys.stderr.flush()
         
         if not response.user:
@@ -137,7 +155,7 @@ async def login(request: Request, credentials: LoginRequest):
         elif "email not confirmed" in error_message or "email_not_confirmed" in error_message:
             raise AuthenticationError(
                 "Email not verified. Please check your email for verification link.",
-                details={"email": credentials.email}
+                details={"email": login_email}
             )
         elif "network" in error_message or "connection" in error_message:
             raise DatabaseError("Unable to connect to authentication service. Please try again.")

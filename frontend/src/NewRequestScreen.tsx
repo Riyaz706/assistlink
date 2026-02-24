@@ -1,11 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, Dimensions, StatusBar, Modal, Platform, Animated, Easing, Alert, ActivityIndicator } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, Dimensions, StatusBar, Modal, Platform, Animated, Easing, Alert, ActivityIndicator, Switch, Image } from 'react-native';
+import Slider from '@react-native-community/slider';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { api } from './api/client';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useErrorHandler, ErrorDetails } from './hooks/useErrorHandler';
 import BottomNav from './BottomNav';
 import LeafletMap from './components/LeafletMap';
+import { colors, typography, spacing, layout, borderRadius } from './theme';
 
 // Conditional imports for native modules (not available on web)
 let Location: any = null;
@@ -52,15 +55,15 @@ const CONTAINER_PADDING = 20;
 const TAB_WIDTH = (width - (CONTAINER_PADDING * 2) - (TAB_BAR_PADDING * 2)) / 3;
 
 const COLORS = {
-  background: '#F8F9FA',
-  primaryGreen: '#059669',      // <--- UPDATED DARKER GREEN
-  primaryGreenLight: '#ECFDF5', // <--- UPDATED MINT LIGHT GREEN
-  urgentRed: '#DC2626',
+  background: colors.background,
+  primaryGreen: colors.secondary,
+  primaryGreenLight: colors.secondaryLight,
+  urgentRed: colors.error,
   urgentRedLight: '#FEE2E2',
-  darkText: '#1A1A1A',
-  grayText: '#6B7280',
-  white: '#FFFFFF',
-  border: '#E5E7EB'
+  darkText: colors.textPrimary,
+  grayText: colors.textSecondary,
+  white: colors.card,
+  border: colors.border,
 };
 
 const MONTH_NAMES = [
@@ -69,6 +72,8 @@ const MONTH_NAMES = [
 ];
 
 type TabType = 'exam' | 'daily' | 'urgent';
+
+const DRAFT_KEY = 'assistlink_care_request_draft';
 
 const NewRequestScreen = ({ navigation }: any) => {
   const { error, handleError, clearError } = useErrorHandler();
@@ -98,12 +103,15 @@ const NewRequestScreen = ({ navigation }: any) => {
 
   const backgroundColor = slideAnim.interpolate({
     inputRange: [0, 1, 2],
-    outputRange: [COLORS.primaryGreen, COLORS.primaryGreen, COLORS.urgentRed],
+    outputRange: [colors.primary, colors.secondary, colors.error],
   });
 
   const [selectedAssistance, setSelectedAssistance] = useState<string>('scribe');
   const [selectedUrgency, setSelectedUrgency] = useState<string | null>(null);
-  const [additionalNotes, setAdditionalNotes] = useState(''); // New State
+  const [additionalNotes, setAdditionalNotes] = useState('');
+  const [examSubject, setExamSubject] = useState('');
+  const [examVenue, setExamVenue] = useState('');
+  const [accommodationsNeeded, setAccommodationsNeeded] = useState('');
 
   const [isPickerVisible, setPickerVisible] = useState(false);
   const [pickerStep, setPickerStep] = useState<'date' | 'startTime' | 'endTime'>('date');
@@ -115,14 +123,75 @@ const NewRequestScreen = ({ navigation }: any) => {
   const [examStartTime, setExamStartTime] = useState<string>('');
   const [examEndTime, setExamEndTime] = useState<string>('');
   const [examDuration, setExamDuration] = useState<string>('');
+  const [examDurationHours, setExamDurationHours] = useState(2);
 
   // Daily date & time states
   const [dailyDate, setDailyDate] = useState<string>('');
   const [dailyStartTime, setDailyStartTime] = useState<string>('');
   const [dailyEndTime, setDailyEndTime] = useState<string>('');
   const [dailyDuration, setDailyDuration] = useState<string>('');
+  const [dailyDurationHours, setDailyDurationHours] = useState(2);
   const [tempDate, setTempDate] = useState('');
   const [viewDate, setViewDate] = useState(new Date());
+
+  // Recurring settings - PRD: Recurring Settings
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [recurringFrequency, setRecurringFrequency] = useState<'weekly' | 'daily' | 'monthly'>('weekly');
+  const [recurringDaysOfWeek, setRecurringDaysOfWeek] = useState<number[]>([1]); // 0=Sun..6=Sat, default Mon
+  const [recurringEndDate, setRecurringEndDate] = useState<string>('');
+
+  // Preferred caregiver - PRD: Care Request Screen
+  const [preferredCaregiver, setPreferredCaregiver] = useState<{ id: string; full_name?: string; profile_photo_url?: string } | null>(null);
+  const [preferredCaregiverModalVisible, setPreferredCaregiverModalVisible] = useState(false);
+  const [pastCaregivers, setPastCaregivers] = useState<{ id: string; full_name?: string; profile_photo_url?: string }[]>([]);
+  const [loadingPastCaregivers, setLoadingPastCaregivers] = useState(false);
+
+  // Draft save: load on mount
+  useEffect(() => {
+    AsyncStorage.getItem(DRAFT_KEY).then((json) => {
+      if (json) {
+        try {
+          const d = JSON.parse(json);
+          if (d.activeTab) setActiveTab(d.activeTab);
+          if (d.examSubject) setExamSubject(d.examSubject);
+          if (d.examVenue) setExamVenue(d.examVenue);
+          if (d.accommodationsNeeded) setAccommodationsNeeded(d.accommodationsNeeded);
+          if (d.examDate) setExamDate(d.examDate);
+          if (d.examStartTime) setExamStartTime(d.examStartTime);
+          if (d.examEndTime) setExamEndTime(d.examEndTime);
+          if (d.additionalNotes) setAdditionalNotes(d.additionalNotes);
+          if (d.isRecurring != null) setIsRecurring(d.isRecurring);
+          if (d.recurringFrequency) setRecurringFrequency(d.recurringFrequency);
+          if (d.recurringDaysOfWeek?.length) setRecurringDaysOfWeek(d.recurringDaysOfWeek);
+          if (d.recurringEndDate) setRecurringEndDate(d.recurringEndDate);
+          if (d.preferredCaregiver) setPreferredCaregiver(d.preferredCaregiver);
+        } catch (_) {}
+      }
+    });
+  }, []);
+
+  const saveDraft = () => {
+    const draft = {
+      activeTab,
+      examSubject,
+      examVenue,
+      accommodationsNeeded,
+      examDate,
+      examStartTime,
+      examEndTime,
+      additionalNotes,
+      isRecurring,
+      recurringFrequency,
+      recurringDaysOfWeek,
+      recurringEndDate,
+      preferredCaregiver,
+    };
+    AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+  };
+
+  const clearDraft = () => {
+    AsyncStorage.removeItem(DRAFT_KEY);
+  };
 
   const openPicker = (mode: 'exam' | 'daily', step: 'date' | 'startTime' | 'endTime' = 'date') => {
     setCurrentPickingMode(mode);
@@ -255,24 +324,41 @@ const NewRequestScreen = ({ navigation }: any) => {
       return;
     }
 
+    // Build examDateTime / dailyDateTime for Matchmaking (format: "Oct 15, 2025, 10:00 AM")
+    const examDateTime = (activeTab === 'exam' && examDate && examStartTime) ? `${examDate}, ${examStartTime}` : undefined;
+    const dailyDateTime = (activeTab === 'daily' && dailyDate && dailyStartTime) ? `${dailyDate}, ${dailyStartTime}` : undefined;
+
     // Build a simple payload to help filter caregivers and pre-fill booking
     const payload: any = {
-      serviceType: activeTab === 'exam' ? 'exam_assistance' : activeTab === 'daily' ? 'daily_care' : 'urgent_care', // Updated urgent key
+      serviceType: activeTab === 'exam' ? 'exam_assistance' : activeTab === 'daily' ? 'daily_care' : 'urgent_care',
       assistanceType: activeTab === 'exam' ? selectedAssistance : null,
+      examSubject: examSubject,
+      examVenue: examVenue,
+      accommodationsNeeded: accommodationsNeeded,
       examDate: examDate,
       examStartTime: examStartTime,
       examEndTime: examEndTime,
+      examDateTime,
       examDuration: examDuration,
+      examDurationHours: examDurationHours,
       dailyDate: dailyDate,
       dailyStartTime: dailyStartTime,
       dailyEndTime: dailyEndTime,
+      dailyDateTime,
       dailyDuration: dailyDuration,
+      dailyDurationHours: dailyDurationHours,
       locationText,
       location: selectedLocation, // Include coordinates
       urgencyLevel: activeTab === 'urgent' ? 'high' : 'medium',
       specificRequirements: activeTab === 'urgent' ? selectedUrgency : additionalNotes, // Map urgency type or notes
-      additionalNotes: additionalNotes // Pass raw notes too
+      additionalNotes: additionalNotes, // Pass raw notes too
+      isRecurring: (activeTab === 'exam' || activeTab === 'daily') ? isRecurring : false,
+      recurring_pattern: (activeTab === 'exam' || activeTab === 'daily') && isRecurring
+        ? { frequency: recurringFrequency, days_of_week: recurringFrequency === 'weekly' ? recurringDaysOfWeek : undefined, end_date: recurringEndDate || null }
+        : undefined,
+      preferredCaregiverId: preferredCaregiver?.id || undefined,
     };
+    clearDraft();
     navigation.navigate('MatchmakingScreen', payload);
   };
 
@@ -513,6 +599,61 @@ const NewRequestScreen = ({ navigation }: any) => {
   };
 
   // Handle map press to select location (Leaflet sends lat, lng)
+  // Load past caregivers (from bookings + chat sessions) for preferred caregiver picker
+  const loadPastCaregivers = async () => {
+    setLoadingPastCaregivers(true);
+    try {
+      const [bookingsRes, chatRes] = await Promise.all([
+        api.getDashboardBookings({ limit: 50 }).catch(() => []),
+        api.getChatSessions().catch(() => []),
+      ]);
+      const bookings = (bookingsRes as any[]) || [];
+      const chatSessions = (chatRes as any[]) || [];
+
+      const seen = new Set<string>();
+      const list: { id: string; full_name?: string; profile_photo_url?: string }[] = [];
+
+      // From bookings: caregiver_id / caregiver
+      for (const b of bookings) {
+        const cid = b.caregiver_id || b.caregiver?.id;
+        if (cid && !seen.has(cid)) {
+          seen.add(cid);
+          list.push({
+            id: cid,
+            full_name: b.caregiver?.full_name || 'Caregiver',
+            profile_photo_url: b.caregiver?.profile_photo_url,
+          });
+        }
+      }
+
+      // From chat sessions (care_recipient sees caregiver as other party)
+      for (const s of chatSessions) {
+        const c = s.caregiver || s.caregiver_id;
+        const cid = typeof c === 'object' ? c?.id : c;
+        if (cid && !seen.has(cid)) {
+          seen.add(cid);
+          const caregiver = typeof c === 'object' ? c : null;
+          list.push({
+            id: cid,
+            full_name: caregiver?.full_name || 'Caregiver',
+            profile_photo_url: caregiver?.profile_photo_url,
+          });
+        }
+      }
+
+      setPastCaregivers(list);
+    } catch (e) {
+      setPastCaregivers([]);
+    } finally {
+      setLoadingPastCaregivers(false);
+    }
+  };
+
+  const openPreferredCaregiverModal = () => {
+    setPreferredCaregiverModalVisible(true);
+    loadPastCaregivers();
+  };
+
   const handleMapPress = (lat: number, lng: number) => {
     const newLocation = { latitude: lat, longitude: lng };
     setSelectedLocation(newLocation);
@@ -543,6 +684,79 @@ const NewRequestScreen = ({ navigation }: any) => {
     }
   };
 
+  const renderPreferredCaregiverSection = () => (
+    <View style={styles.section}>
+      <Text style={styles.sectionLabel}>Preferred caregiver (optional)</Text>
+      <TouchableOpacity
+        style={styles.inputContainer}
+        onPress={openPreferredCaregiverModal}
+      >
+        {preferredCaregiver ? (
+          <View style={styles.preferredCaregiverRow}>
+            {preferredCaregiver.profile_photo_url ? (
+              <Image source={{ uri: preferredCaregiver.profile_photo_url }} style={styles.preferredCaregiverAvatar} />
+            ) : (
+              <View style={[styles.preferredCaregiverAvatar, styles.preferredCaregiverAvatarPlaceholder]}>
+                <Icon name="account" size={20} color={COLORS.grayText} />
+              </View>
+            )}
+            <Text style={styles.inputText}>{preferredCaregiver.full_name || 'Caregiver'}</Text>
+            <TouchableOpacity onPress={() => setPreferredCaregiver(null)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+              <Icon name="close-circle" size={22} color={COLORS.grayText} />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            <Text style={[styles.inputText, { color: COLORS.grayText }]}>Select caregiver or leave as any</Text>
+            <Icon name="account-group" size={20} color={COLORS.primaryGreen} />
+          </>
+        )}
+      </TouchableOpacity>
+      <Modal visible={preferredCaregiverModalVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setPreferredCaregiverModalVisible(false)} />
+          <View style={styles.preferredCaregiverModal}>
+            <Text style={styles.modalTitle}>Preferred caregiver</Text>
+            {loadingPastCaregivers ? (
+              <ActivityIndicator size="small" color={COLORS.primaryGreen} style={{ marginVertical: 24 }} />
+            ) : pastCaregivers.length === 0 ? (
+              <Text style={styles.modalEmptyText}>No past caregivers yet. You'll see them after your first booking.</Text>
+            ) : (
+              <ScrollView style={styles.preferredCaregiverList}>
+                <TouchableOpacity
+                  style={styles.preferredCaregiverItem}
+                  onPress={() => { setPreferredCaregiver(null); setPreferredCaregiverModalVisible(false); }}
+                >
+                  <Icon name="account-multiple" size={24} color={COLORS.grayText} />
+                  <Text style={styles.preferredCaregiverItemText}>No preference (any caregiver)</Text>
+                </TouchableOpacity>
+                {pastCaregivers.map((c) => (
+                  <TouchableOpacity
+                    key={c.id}
+                    style={styles.preferredCaregiverItem}
+                    onPress={() => { setPreferredCaregiver(c); setPreferredCaregiverModalVisible(false); }}
+                  >
+                    {c.profile_photo_url ? (
+                      <Image source={{ uri: c.profile_photo_url }} style={styles.preferredCaregiverAvatar} />
+                    ) : (
+                      <View style={[styles.preferredCaregiverAvatar, styles.preferredCaregiverAvatarPlaceholder]}>
+                        <Icon name="account" size={20} color={COLORS.grayText} />
+                      </View>
+                    )}
+                    <Text style={styles.preferredCaregiverItemText}>{c.full_name || 'Caregiver'}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
+            <TouchableOpacity style={styles.modalCloseButton} onPress={() => setPreferredCaregiverModalVisible(false)}>
+              <Text style={styles.modalCloseButtonText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </View>
+  );
+
   const renderLocationSection = () => (
     <View style={styles.section}>
       <Text style={styles.sectionLabel}>Location</Text>
@@ -563,6 +777,7 @@ const NewRequestScreen = ({ navigation }: any) => {
           )}
         </TouchableOpacity>
       </View>
+      <Text style={styles.subLabel}>Map preview</Text>
       <View style={styles.mapContainer}>
         <LeafletMap
           center={{ lat: mapRegion.latitude, lng: mapRegion.longitude }}
@@ -584,8 +799,18 @@ const NewRequestScreen = ({ navigation }: any) => {
         <Text style={styles.sectionLabel}>Exam Details</Text>
         <Text style={styles.subLabel}>Subject / Course</Text>
         <View style={styles.inputContainer}>
-          <TextInput style={styles.input} placeholder="e.g. Calculus II, History 101" placeholderTextColor={COLORS.grayText} />
+          <TextInput style={styles.input} placeholder="e.g. Calculus II, History 101" placeholderTextColor={COLORS.grayText} value={examSubject} onChangeText={setExamSubject} />
           <Icon name="book-open-variant" size={20} color={COLORS.primaryGreen} />
+        </View>
+        <Text style={styles.subLabel}>Venue / Location</Text>
+        <View style={styles.inputContainer}>
+          <TextInput style={styles.input} placeholder="e.g. Hall A, Room 101" placeholderTextColor={COLORS.grayText} value={examVenue} onChangeText={setExamVenue} />
+          <Icon name="map-marker" size={20} color={COLORS.primaryGreen} />
+        </View>
+        <Text style={styles.subLabel}>Accommodations needed</Text>
+        <View style={styles.inputContainer}>
+          <TextInput style={styles.input} placeholder="e.g. Wheelchair access, extra time" placeholderTextColor={COLORS.grayText} value={accommodationsNeeded} onChangeText={setAccommodationsNeeded} />
+          <Icon name="accessibility" size={20} color={COLORS.primaryGreen} />
         </View>
       </View>
 
@@ -661,13 +886,69 @@ const NewRequestScreen = ({ navigation }: any) => {
         {examDuration && (
           <View style={styles.durationContainer}>
             <Icon name="timer-outline" size={20} color={COLORS.primaryGreen} />
-            <Text style={styles.durationText}>Duration: {examDuration}</Text>
+            <Text style={styles.durationText}>From times: {examDuration}</Text>
           </View>
+        )}
+        <Text style={styles.subLabel}>Estimated duration (hours)</Text>
+        <View style={styles.sliderRow}>
+          <Slider
+            style={styles.slider}
+            minimumValue={1}
+            maximumValue={8}
+            step={0.5}
+            value={examDurationHours}
+            onValueChange={setExamDurationHours}
+            minimumTrackTintColor={COLORS.primaryGreen}
+            maximumTrackTintColor={COLORS.border}
+            thumbTintColor={COLORS.primaryGreen}
+          />
+          <Text style={styles.sliderValue}>{examDurationHours}h</Text>
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <View style={styles.recurringRow}>
+          <Text style={styles.sectionLabel}>Recurring</Text>
+          <Switch value={isRecurring} onValueChange={setIsRecurring} trackColor={{ false: COLORS.border, true: COLORS.primaryGreen }} thumbColor="#FFF" />
+        </View>
+        {isRecurring && (
+          <>
+            <Text style={styles.subLabel}>Frequency</Text>
+            <View style={styles.frequencyRow}>
+              {(['weekly', 'daily', 'monthly'] as const).map((f) => (
+                <TouchableOpacity key={f} style={[styles.frequencyChip, recurringFrequency === f && styles.frequencyChipActive]} onPress={() => setRecurringFrequency(f)}>
+                  <Text style={[styles.frequencyChipText, recurringFrequency === f && styles.frequencyChipTextActive]}>{f.charAt(0).toUpperCase() + f.slice(1)}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            {recurringFrequency === 'weekly' && (
+              <>
+                <Text style={styles.subLabel}>Days of week</Text>
+                <View style={styles.daysRow}>
+                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d, i) => (
+                    <TouchableOpacity key={d} style={[styles.dayChip, recurringDaysOfWeek.includes(i) && styles.dayChipActive]} onPress={() => setRecurringDaysOfWeek(prev => prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i].sort())}>
+                      <Text style={[styles.dayChipText, recurringDaysOfWeek.includes(i) && styles.dayChipTextActive]}>{d.slice(0, 1)}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </>
+            )}
+            <Text style={styles.subLabel}>End date (optional, YYYY-MM-DD)</Text>
+            <View style={styles.inputContainer}>
+              <TextInput style={styles.input} placeholder="e.g. 2025-12-31" placeholderTextColor={COLORS.grayText} value={recurringEndDate} onChangeText={setRecurringEndDate} />
+              <Icon name="calendar" size={20} color={COLORS.primaryGreen} />
+            </View>
+          </>
         )}
       </View>
 
+      {renderPreferredCaregiverSection()}
       {renderLocationSection()}
 
+      <TouchableOpacity style={styles.draftButton} onPress={saveDraft}>
+        <Icon name="content-save" size={20} color={COLORS.primaryGreen} />
+        <Text style={styles.draftButtonText}>Save draft</Text>
+      </TouchableOpacity>
       <TouchableOpacity style={styles.mainButton} onPress={goToMatchmaking}>
         <Text style={styles.mainButtonText}>Find Caregiver</Text>
         <Icon name="magnify" size={24} color="white" style={{ marginLeft: 8 }} />
@@ -724,13 +1005,69 @@ const NewRequestScreen = ({ navigation }: any) => {
         {dailyDuration && (
           <View style={styles.durationContainer}>
             <Icon name="timer-outline" size={20} color={COLORS.primaryGreen} />
-            <Text style={styles.durationText}>Duration: {dailyDuration}</Text>
+            <Text style={styles.durationText}>From times: {dailyDuration}</Text>
           </View>
+        )}
+        <Text style={styles.subLabel}>Estimated duration (hours)</Text>
+        <View style={styles.sliderRow}>
+          <Slider
+            style={styles.slider}
+            minimumValue={1}
+            maximumValue={12}
+            step={0.5}
+            value={dailyDurationHours}
+            onValueChange={setDailyDurationHours}
+            minimumTrackTintColor={COLORS.primaryGreen}
+            maximumTrackTintColor={COLORS.border}
+            thumbTintColor={COLORS.primaryGreen}
+          />
+          <Text style={styles.sliderValue}>{dailyDurationHours}h</Text>
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <View style={styles.recurringRow}>
+          <Text style={styles.sectionLabel}>Recurring</Text>
+          <Switch value={isRecurring} onValueChange={setIsRecurring} trackColor={{ false: COLORS.border, true: COLORS.primaryGreen }} thumbColor="#FFF" />
+        </View>
+        {isRecurring && (
+          <>
+            <Text style={styles.subLabel}>Frequency</Text>
+            <View style={styles.frequencyRow}>
+              {(['weekly', 'daily', 'monthly'] as const).map((f) => (
+                <TouchableOpacity key={f} style={[styles.frequencyChip, recurringFrequency === f && styles.frequencyChipActive]} onPress={() => setRecurringFrequency(f)}>
+                  <Text style={[styles.frequencyChipText, recurringFrequency === f && styles.frequencyChipTextActive]}>{f.charAt(0).toUpperCase() + f.slice(1)}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            {recurringFrequency === 'weekly' && (
+              <>
+                <Text style={styles.subLabel}>Days of week</Text>
+                <View style={styles.daysRow}>
+                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d, i) => (
+                    <TouchableOpacity key={d} style={[styles.dayChip, recurringDaysOfWeek.includes(i) && styles.dayChipActive]} onPress={() => setRecurringDaysOfWeek(prev => prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i].sort())}>
+                      <Text style={[styles.dayChipText, recurringDaysOfWeek.includes(i) && styles.dayChipTextActive]}>{d.slice(0, 1)}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </>
+            )}
+            <Text style={styles.subLabel}>End date (optional, YYYY-MM-DD)</Text>
+            <View style={styles.inputContainer}>
+              <TextInput style={styles.input} placeholder="e.g. 2025-12-31" placeholderTextColor={COLORS.grayText} value={recurringEndDate} onChangeText={setRecurringEndDate} />
+              <Icon name="calendar" size={20} color={COLORS.primaryGreen} />
+            </View>
+          </>
         )}
       </View>
 
+      {renderPreferredCaregiverSection()}
       {renderLocationSection()}
 
+      <TouchableOpacity style={styles.draftButton} onPress={saveDraft}>
+        <Icon name="content-save" size={20} color={COLORS.primaryGreen} />
+        <Text style={styles.draftButtonText}>Save draft</Text>
+      </TouchableOpacity>
       <TouchableOpacity style={styles.mainButton} onPress={goToMatchmaking}>
         <Text style={styles.mainButtonText}>Find Caregiver</Text>
         <Icon name="magnify" size={24} color="white" style={{ marginLeft: 8 }} />
@@ -851,8 +1188,8 @@ const styles = StyleSheet.create({
   resetText: { color: COLORS.primaryGreen, fontWeight: '600', fontSize: 16 },
 
   scrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 20,
+    paddingHorizontal: layout.screenPadding,
+    paddingTop: spacing.lg,
     paddingBottom: 150,
   },
 
@@ -929,6 +1266,19 @@ const styles = StyleSheet.create({
   // Buttons
   mainButton: { backgroundColor: COLORS.primaryGreen, height: 56, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 12, shadowColor: COLORS.primaryGreen, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
   mainButtonText: { color: 'white', fontSize: 18, fontWeight: 'bold' },
+  draftButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 12, paddingVertical: 12, gap: 8, borderWidth: 1, borderColor: COLORS.primaryGreen, borderRadius: 12 },
+  draftButtonText: { color: COLORS.primaryGreen, fontSize: 16, fontWeight: '600' },
+  recurringRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  frequencyRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  frequencyChip: { paddingVertical: 10, paddingHorizontal: 16, borderRadius: 10, backgroundColor: COLORS.primaryGreenLight },
+  frequencyChipActive: { backgroundColor: '#D1FAE5', borderWidth: 1, borderColor: COLORS.primaryGreen },
+  frequencyChipText: { fontSize: 14, fontWeight: '600', color: COLORS.grayText },
+  frequencyChipTextActive: { color: COLORS.primaryGreen },
+  daysRow: { flexDirection: 'row', gap: 8, marginBottom: 12, flexWrap: 'wrap' },
+  dayChip: { width: 36, height: 36, borderRadius: 18, backgroundColor: COLORS.primaryGreenLight, alignItems: 'center', justifyContent: 'center' },
+  dayChipActive: { backgroundColor: COLORS.primaryGreen },
+  dayChipText: { fontSize: 12, fontWeight: '600', color: COLORS.grayText },
+  dayChipTextActive: { color: '#FFF' },
   sosButton: { backgroundColor: '#DC2626', height: 56, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 12, elevation: 4 },
   sosButtonText: { color: 'white', fontSize: 18, fontWeight: 'bold' },
 
@@ -939,6 +1289,18 @@ const styles = StyleSheet.create({
   broadcastIconContainer: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(220, 38, 38, 0.1)', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
   broadcastTitle: { fontSize: 16, fontWeight: 'bold', color: '#991B1B', marginBottom: 4 },
   broadcastText: { fontSize: 14, color: '#B91C1C', lineHeight: 20 },
+
+  // Preferred caregiver
+  preferredCaregiverRow: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 12 },
+  preferredCaregiverAvatar: { width: 36, height: 36, borderRadius: 18 },
+  preferredCaregiverAvatarPlaceholder: { backgroundColor: COLORS.border, alignItems: 'center', justifyContent: 'center' },
+  preferredCaregiverModal: { backgroundColor: 'white', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: '70%', width: '100%' },
+  modalEmptyText: { fontSize: 14, color: COLORS.grayText, textAlign: 'center', marginVertical: 24 },
+  preferredCaregiverList: { maxHeight: 280, marginBottom: 12 },
+  preferredCaregiverItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: COLORS.border, gap: 12 },
+  preferredCaregiverItemText: { fontSize: 16, color: COLORS.darkText, flex: 1 },
+  modalCloseButton: { backgroundColor: COLORS.primaryGreenLight, paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
+  modalCloseButtonText: { fontSize: 16, fontWeight: '600', color: COLORS.primaryGreen },
 
   // Modal Styles
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
@@ -960,6 +1322,19 @@ const styles = StyleSheet.create({
   // Exam time row
   timeRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, marginTop: 8 },
   timeInputContainer: { flex: 1 },
+  sliderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  slider: { flex: 1, height: 40 },
+  sliderValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.primaryGreen,
+    minWidth: 44,
+    textAlign: 'right',
+  },
   durationContainer: {
     flexDirection: 'row',
     alignItems: 'center',

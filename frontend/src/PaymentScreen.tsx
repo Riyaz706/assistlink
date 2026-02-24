@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,8 +20,29 @@ const PaymentScreen = () => {
   const params = route.params || {};
   const bookingId = params.bookingId ?? params.appointment?.id;
   const [loading, setLoading] = useState(false);
+  const [paymentProcessing, setPaymentProcessing] = useState(false);
   const submittingRef = useRef(false);
+  const successShownRef = useRef(false);
   const amountRupees = 50;
+
+  // Real-time: listen for payment_status updates (e.g. from Razorpay webhook)
+  useEffect(() => {
+    if (!bookingId) return;
+    successShownRef.current = false;
+    const channel = api.subscribeToBooking(bookingId, (data: { payment_status?: string }) => {
+      const status = data?.payment_status || '';
+      if ((status === 'captured' || status === 'completed') && !successShownRef.current) {
+        successShownRef.current = true;
+        setLoading(false);
+        setPaymentProcessing(false);
+        submittingRef.current = false;
+        Alert.alert("Success", "Payment confirmed! Booking is confirmed and chat is enabled.", [
+          { text: "OK", onPress: () => navigation.navigate("BookingsScreen") }
+        ]);
+      }
+    });
+    return () => api.unsubscribeFromBooking(channel);
+  }, [bookingId, navigation]);
 
   const handlePayment = async () => {
     if (!bookingId) {
@@ -65,6 +86,7 @@ const PaymentScreen = () => {
         if (Platform.OS === 'android') {
           (options as any).theme = { color: '#007AFF' };
         }
+        setPaymentProcessing(true);
         RazorpayCheckout.open(options)
           .then((data: { razorpay_payment_id: string; razorpay_order_id: string; razorpay_signature: string }) => {
             return api.verifyPayment({
@@ -74,6 +96,8 @@ const PaymentScreen = () => {
             });
           })
           .then(() => {
+            if (successShownRef.current) return;
+            successShownRef.current = true;
             Alert.alert("Success", "Payment Successful and Booking Confirmed!", [
               { text: "OK", onPress: () => navigation.navigate("BookingsScreen") }
             ]);
@@ -84,7 +108,11 @@ const PaymentScreen = () => {
               Alert.alert("Error", err?.description || err?.message || "Payment Failed");
             }
           })
-          .finally(() => setLoading(false));
+          .finally(() => {
+            setLoading(false);
+            setPaymentProcessing(false);
+            submittingRef.current = false;
+          });
         return;
       }
 
@@ -129,6 +157,9 @@ const PaymentScreen = () => {
         {!canPay && (
           <Text style={styles.errorText}>Booking not found. Go back and open payment from a booking.</Text>
         )}
+        {paymentProcessing && (
+          <Text style={styles.processingText}>Waiting for payment confirmation...</Text>
+        )}
         <TouchableOpacity
           style={[styles.payButton, !canPay && styles.payButtonDisabled]}
           onPress={handlePayment}
@@ -162,6 +193,7 @@ const styles = StyleSheet.create({
   payButtonDisabled: { backgroundColor: '#999', opacity: 0.8 },
   payButtonText: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
   errorText: { color: '#DC2626', fontSize: 14, textAlign: 'center', marginBottom: 16 },
+  processingText: { color: '#007AFF', fontSize: 14, marginBottom: 12 },
 });
 
 export default PaymentScreen;

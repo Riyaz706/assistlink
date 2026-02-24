@@ -37,8 +37,10 @@ import VideoCallScreen from '../VideoCallScreen';
 import EditProfileScreen from '../EditProfileScreen';
 import ChangePasswordScreen from '../ChangePasswordScreen';
 import SettingsScreen from '../SettingsScreen';
+import LanguagePickerScreen from '../LanguagePickerScreen';
 import HelpSupportScreen from '../HelpSupportScreen';
 import NSSPortalScreen from '../NSSPortalScreen';
+import ProfileSetupScreen from '../ProfileSetupScreen';
 import BookingsScreen from '../BookingsScreen';
 import BookingDetailScreen from '../BookingDetailScreen';
 
@@ -111,10 +113,12 @@ const AppNavigator = () => {
                     <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
                     <Stack.Screen name="ChatDetailsScreen" component={ChatDetailsScreen} />
                     <Stack.Screen name="Settings" component={SettingsScreen} />
+                    <Stack.Screen name="LanguagePicker" component={LanguagePickerScreen} />
                     <Stack.Screen name="HelpSupport" component={HelpSupportScreen} />
                     <Stack.Screen name="NSSPortal" component={NSSPortalScreen} />
                     <Stack.Screen name="BookingsScreen" component={BookingsScreen} />
                     <Stack.Screen name="BookingDetailScreen" component={BookingDetailScreen} />
+                    <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
                 </>
             )}
         </Stack.Navigator>

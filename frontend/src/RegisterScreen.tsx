@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar, KeyboardAvoidingView, Platform, ScrollView, Dimensions, Image } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar, KeyboardAvoidingView, Platform, ScrollView, Dimensions, Image, Alert } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 
 // Using Expo Icons
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
@@ -35,6 +36,12 @@ const RegisterScreen = ({ navigation }: any) => {
 
   const [selectedRole, setSelectedRole] = useState('provide');
   const [loading, setLoading] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [emergencyContactName, setEmergencyContactName] = useState('');
+  const [emergencyContactPhone, setEmergencyContactPhone] = useState('');
+  const [disabilityNeeds, setDisabilityNeeds] = useState('');
+  const [caregiverSkills, setCaregiverSkills] = useState('');
+  const [profilePhotoUri, setProfilePhotoUri] = useState<string | null>(null);
   const { login, googleLogin } = useAuth();
   const { signInWithGoogle, loading: googleLoading, isReady: googleReady } = useGoogleAuth();
   const { error, handleError, clearError } = useErrorHandler();
@@ -93,6 +100,10 @@ const RegisterScreen = ({ navigation }: any) => {
     clearError();
 
     // Client-side validation
+    if (!termsAccepted) {
+      handleError(new Error('You must accept the Terms and Conditions to create an account'), 'validation');
+      return;
+    }
     if (!fullName || !email || !password) {
       handleError(new Error('Please fill all required fields'), 'validation');
       return;
@@ -141,6 +152,30 @@ const RegisterScreen = ({ navigation }: any) => {
 
       // Auto-login after successful registration
       await login(email.trim(), password);
+      // Upload profile photo if selected
+      if (profilePhotoUri) {
+        try {
+          await api.uploadProfilePhoto(profilePhotoUri, 'profile.jpg', 'image/jpeg');
+        } catch (_) { /* non-blocking */ }
+      }
+      // Save emergency contact and extra info if provided
+      if (emergencyContactName.trim() && emergencyContactPhone.trim()) {
+        try {
+          await api.updateProfile({
+            emergency_contact: { name: emergencyContactName.trim(), phone: emergencyContactPhone.trim() },
+          });
+        } catch (_) {}
+      }
+      if (selectedRole === 'find' && disabilityNeeds.trim()) {
+        try {
+          await api.updateProfile({ address: { care_needs: disabilityNeeds.trim() } });
+        } catch (_) {}
+      }
+      if (selectedRole === 'provide' && caregiverSkills.trim()) {
+        try {
+          await api.createCaregiverProfile({ skills: caregiverSkills.split(',').map((s) => s.trim()).filter(Boolean) });
+        } catch (_) {}
+      }
     } catch (e: any) {
       const errorDetails = handleError(e, 'register');
 
@@ -358,6 +393,127 @@ const RegisterScreen = ({ navigation }: any) => {
               <Text style={styles.helperText}>Must be at least 8 characters</Text>
             </View>
 
+            {/* Profile Photo - PRD */}
+            <View style={styles.inputWrapper}>
+              <Text style={styles.label}>Profile Photo (optional)</Text>
+              <TouchableOpacity
+                style={styles.photoPicker}
+                onPress={async () => {
+                  try {
+                    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                    if (status !== 'granted') {
+                      Alert.alert('Permission', 'Allow photo library access to add a profile photo.');
+                      return;
+                    }
+                    const result = await ImagePicker.launchImageLibraryAsync({
+                      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                      allowsEditing: true,
+                      aspect: [1, 1],
+                      quality: 0.8,
+                    });
+                    if (!result.canceled && result.assets?.[0]?.uri) {
+                      setProfilePhotoUri(result.assets[0].uri);
+                    }
+                  } catch (e: any) {
+                    Alert.alert('Error', e?.message || 'Could not pick photo.');
+                  }
+                }}
+                accessibilityLabel="Add profile photo"
+                accessibilityRole="button"
+              >
+                {profilePhotoUri ? (
+                  <Image source={{ uri: profilePhotoUri }} style={styles.photoPreview} />
+                ) : (
+                  <View style={styles.photoPlaceholder}>
+                    <Icon name="camera-plus" size={40} color={COLORS.grayText} />
+                    <Text style={styles.photoPlaceholderText}>Tap to add photo</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {/* Care Recipient: Disability/care needs (PRD) */}
+            {selectedRole === 'find' && (
+              <View style={styles.inputWrapper}>
+                <Text style={styles.label}>Disability / Care needs (optional)</Text>
+                <View style={styles.inputContainer}>
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    placeholder="e.g. Scribe required, wheelchair access"
+                    placeholderTextColor={COLORS.placeholder}
+                    value={disabilityNeeds}
+                    onChangeText={setDisabilityNeeds}
+                    multiline
+                    numberOfLines={2}
+                    accessibilityLabel="Disability or care needs"
+                  />
+                </View>
+              </View>
+            )}
+
+            {/* Caregiver: Skills (PRD) */}
+            {selectedRole === 'provide' && (
+              <View style={styles.inputWrapper}>
+                <Text style={styles.label}>Skills (optional)</Text>
+                <View style={styles.inputContainer}>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. Exam scribe, daily care, mobility support"
+                    placeholderTextColor={COLORS.placeholder}
+                    value={caregiverSkills}
+                    onChangeText={setCaregiverSkills}
+                    accessibilityLabel="Caregiver skills"
+                  />
+                </View>
+              </View>
+            )}
+
+            {/* Emergency contact (PRD) */}
+            <View style={styles.inputWrapper}>
+              <Text style={styles.label}>Emergency contact name (optional)</Text>
+              <View style={styles.inputContainer}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g. Family member"
+                  placeholderTextColor={COLORS.placeholder}
+                  value={emergencyContactName}
+                  onChangeText={setEmergencyContactName}
+                />
+              </View>
+            </View>
+            <View style={styles.inputWrapper}>
+              <Text style={styles.label}>Emergency contact phone (optional)</Text>
+              <View style={styles.inputContainer}>
+                <Text style={styles.prefixText}>+91</Text>
+                <View style={styles.verticalDivider} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="98765 43210"
+                  placeholderTextColor={COLORS.placeholder}
+                  keyboardType="phone-pad"
+                  maxLength={10}
+                  value={emergencyContactPhone}
+                  onChangeText={setEmergencyContactPhone}
+                />
+              </View>
+            </View>
+
+            {/* Terms and conditions (PRD) */}
+            <TouchableOpacity
+              style={styles.termsRow}
+              onPress={() => setTermsAccepted(!termsAccepted)}
+              accessibilityLabel={termsAccepted ? 'Terms accepted' : 'Accept terms'}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: termsAccepted }}
+            >
+              <View style={[styles.checkbox, termsAccepted && styles.checkboxChecked]}>
+                {termsAccepted && <Icon name="check" size={14} color="#FFF" />}
+              </View>
+              <Text style={styles.termsText}>
+                I accept the <Text style={styles.termsLink} onPress={() => setTermsAccepted(!termsAccepted)}>Terms and Conditions</Text>
+              </Text>
+            </TouchableOpacity>
+
             {/* Create Account Button */}
             {error ? (
               <View style={styles.errorContainer}>
@@ -367,11 +523,11 @@ const RegisterScreen = ({ navigation }: any) => {
             ) : null}
 
             <TouchableOpacity
-              style={styles.createButton}
+              style={[styles.createButton, (!termsAccepted || loading) && { opacity: 0.7 }]}
               activeOpacity={0.8}
               onPress={handleCreateAccount}
-              disabled={loading}
-              accessibilityLabel={loading ? 'Creating account' : 'Create account'}
+              disabled={loading || !termsAccepted}
+              accessibilityLabel={loading ? 'Creating account' : termsAccepted ? 'Create account' : 'Accept terms to continue'}
               accessibilityRole="button"
               accessibilityState={{ disabled: loading }}
             >
@@ -582,6 +738,29 @@ const styles = StyleSheet.create({
     color: COLORS.grayText,
     fontSize: 12,
   },
+  photoPicker: {
+    alignSelf: 'flex-start',
+    borderRadius: 60,
+    overflow: 'hidden',
+  },
+  photoPreview: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+  },
+  photoPlaceholder: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: COLORS.inputBorder,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  photoPlaceholderText: {
+    marginTop: 6,
+    color: COLORS.grayText,
+    fontSize: 12,
+  },
   errorContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -597,6 +776,28 @@ const styles = StyleSheet.create({
     color: COLORS.errorRed,
     fontSize: 13,
   },
+  textArea: { minHeight: 72, textAlignVertical: 'top' },
+  termsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderWidth: 2,
+    borderColor: COLORS.inputBorder,
+    borderRadius: 6,
+    marginRight: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: COLORS.primaryGreen,
+    borderColor: COLORS.primaryGreen,
+  },
+  termsText: { fontSize: 14, color: COLORS.darkText, flex: 1 },
+  termsLink: { color: COLORS.primaryGreen, fontWeight: '600' },
   createButton: {
     backgroundColor: COLORS.primaryGreen,
     borderRadius: 12,

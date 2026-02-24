@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException, status, Depends, Query
+from fastapi import APIRouter, HTTPException, status, Depends, Query, File, UploadFile
 from typing import List, Optional
 from datetime import datetime, timezone
+import uuid
 from app.schemas import MessageCreate, MessageResponse, ChatSessionResponse
 from app.database import supabase, supabase_admin
 from app.dependencies import get_current_user
@@ -14,6 +15,12 @@ from app.error_handler import (
 )
 
 router = APIRouter()
+
+# Chat attachments (voice, images) - create bucket "chat-attachments" in Supabase Storage
+CHAT_ATTACHMENTS_BUCKET = "chat-attachments"
+ALLOWED_AUDIO_TYPES = {"audio/mpeg", "audio/mp4", "audio/m4a", "audio/x-m4a", "audio/wav", "audio/webm", "audio/aac"}
+ALLOWED_DOC_TYPES = {"application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
+MAX_AUDIO_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
 @router.get("/sessions", response_model=List[dict])
@@ -189,6 +196,71 @@ async def get_messages(
         raise
     except Exception as e:
         raise DatabaseError(str(e))
+
+
+@router.post("/sessions/{chat_session_id}/upload")
+async def upload_chat_attachment(
+    chat_session_id: str,
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Upload a chat attachment (voice message, image) and return the public URL."""
+    try:
+        chat_response = supabase_admin.table("chat_sessions").select("*").eq("id", chat_session_id).execute()
+        if not chat_response.data:
+            raise HTTPException(status_code=404, detail="Chat session not found")
+        chat_session = chat_response.data[0]
+        if chat_session["care_recipient_id"] != current_user["id"] and chat_session["caregiver_id"] != current_user["id"]:
+            raise HTTPException(status_code=403, detail="Access denied")
+        if not chat_session["is_enabled"]:
+            raise HTTPException(status_code=403, detail="Chat session is not enabled")
+
+        content_type = (file.content_type or "").lower()
+        allowed = ALLOWED_AUDIO_TYPES | ALLOWED_DOC_TYPES
+        is_image = content_type.startswith("image/")
+        if content_type not in allowed and not is_image:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file type. Allowed: audio, images, PDF, documents. Got: {content_type or 'unknown'}",
+            )
+
+        body = await file.read()
+        if len(body) > MAX_AUDIO_BYTES:
+            raise HTTPException(status_code=400, detail="File too large. Maximum size is 10 MB.")
+
+        ext = "m4a"
+        if "mpeg" in content_type or "mp3" in content_type:
+            ext = "mp3"
+        elif "wav" in content_type:
+            ext = "wav"
+        elif "webm" in content_type:
+            ext = "webm"
+        elif "png" in content_type:
+            ext = "png"
+        elif "jpeg" in content_type or "jpg" in content_type:
+            ext = "jpg"
+        elif "webp" in content_type:
+            ext = "webp"
+        elif "gif" in content_type:
+            ext = "gif"
+        elif "pdf" in content_type:
+            ext = "pdf"
+        elif "msword" in content_type or "wordprocessingml" in content_type:
+            ext = "docx" if "wordprocessingml" in content_type else "doc"
+        storage_path = f"{chat_session_id}/{current_user['id']}/{uuid.uuid4()}.{ext}"
+
+        storage = supabase_admin.storage.from_(CHAT_ATTACHMENTS_BUCKET)
+        storage.upload(
+            path=storage_path,
+            file=body,
+            file_options={"content-type": content_type, "upsert": "true"},
+        )
+        public_url = storage.get_public_url(storage_path)
+        return {"url": public_url}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/sessions/{chat_session_id}/messages", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)

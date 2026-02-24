@@ -117,14 +117,14 @@ const HelpSupportScreen = ({ navigation }: any) => {
           <Item
             icon="play-circle"
             label="Video tutorials"
-            onPress={() => Alert.alert('Coming soon', 'Video tutorials will be available in a future update.')}
-            hint="Opens video tutorials. Coming soon."
+            onPress={() => Linking.openURL('https://assistlink.app/help/tutorials').catch(() => Alert.alert('Error', 'Could not open tutorials.'))}
+            hint="Opens video tutorials"
           />
           <Item
             icon="book-open-variant"
             label="User manual"
-            onPress={() => Alert.alert('Coming soon', 'The user manual will be available in a future update.')}
-            hint="Opens user manual. Coming soon."
+            onPress={() => Linking.openURL('https://assistlink.app/help/manual').catch(() => Alert.alert('Error', 'Could not open user manual.'))}
+            hint="Opens user manual"
           />
           <Item
             icon="file-document-outline"

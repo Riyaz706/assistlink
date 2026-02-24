@@ -1,3 +1,7 @@
+/**
+ * Vite config - PRD: Vite for build tooling and development.
+ * Used for Vitest (testing). App build uses Expo/Metro for native, Expo export for web.
+ */
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({

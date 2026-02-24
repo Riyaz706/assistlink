@@ -181,7 +181,7 @@ export default function VideoCallScreen() {
             </Text>
             <Text style={styles.errorMessage}>{errorMessage}</Text>
             <View style={styles.errorActions}>
-              {error === 'permission_denied' && (
+              {(error === 'permission_denied' || error === 'signaling' || error === 'config') && (
                 <TouchableOpacity
                   style={styles.primaryButton}
                   onPress={retry}

@@ -58,6 +58,7 @@ export default function EditProfileScreen({ navigation, route }: any) {
   const [bio, setBio] = useState('');
   const [qualifications, setQualifications] = useState('');
   const [skills, setSkills] = useState('');
+  const [languagesSpoken, setLanguagesSpoken] = useState('');
   const [experienceYears, setExperienceYears] = useState('');
   const [hourlyRate, setHourlyRate] = useState('');
   const [caregiverProfile, setCaregiverProfile] = useState<any>(null);
@@ -151,6 +152,7 @@ export default function EditProfileScreen({ navigation, route }: any) {
           setBio(cgProfile.bio || '');
           setQualifications((cgProfile.qualifications || []).join(', ') || '');
           setSkills((cgProfile.skills || []).join(', ') || '');
+          setLanguagesSpoken((cgProfile.languages_spoken || []).join(', ') || '');
           setExperienceYears(cgProfile.experience_years?.toString() || '');
           setHourlyRate(cgProfile.hourly_rate?.toString() || '');
         } catch (e) {
@@ -223,6 +225,10 @@ export default function EditProfileScreen({ navigation, route }: any) {
         // Skills - same logic
         const skillList = skills.split(',').map(s => s.trim()).filter(Boolean);
         cgUpdateData.skills = skillList;
+
+        // Languages spoken - PRD
+        const langList = languagesSpoken.split(',').map(l => l.trim()).filter(Boolean);
+        cgUpdateData.languages_spoken = langList;
 
         if (experienceYears.trim()) {
           cgUpdateData.experience_years = parseInt(experienceYears) || null;
@@ -441,6 +447,18 @@ export default function EditProfileScreen({ navigation, route }: any) {
                   placeholderTextColor={THEME.subText}
                 />
                 <Text style={styles.helperText}>Separate multiple skills with commas</Text>
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Languages Spoken</Text>
+                <TextInput
+                  style={styles.input}
+                  value={languagesSpoken}
+                  onChangeText={setLanguagesSpoken}
+                  placeholder="e.g. English, Hindi, Tamil"
+                  placeholderTextColor={THEME.subText}
+                />
+                <Text style={styles.helperText}>Separate multiple languages with commas</Text>
               </View>
 
               <View style={styles.inputRow}>

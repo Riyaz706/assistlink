@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Dimensions, Animated, StatusBar, Easing } from 'react-native';
+import { View, Text, StyleSheet, Dimensions, Animated, StatusBar, Easing, Image } from 'react-native';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -37,6 +37,15 @@ const SplashScreen = ({ navigation }: any) => {
 
       {/* Background Decor (Optional Glow) */}
       <View style={styles.glow} />
+
+      {/* Company Logo */}
+      <View style={styles.companyLogoContainer}>
+        <Image
+          source={require('../assets/techm4india-logo.png')}
+          style={styles.companyLogo}
+          resizeMode="contain"
+        />
+      </View>
 
       {/* Main Content: Logo & Title */}
       <View style={styles.centerContent}>
@@ -95,6 +104,17 @@ const styles = StyleSheet.create({
     height: width,
     backgroundColor: 'rgba(0, 200, 0, 0.05)',
     borderRadius: width / 2,
+  },
+  companyLogoContainer: {
+    paddingTop: 20,
+    paddingHorizontal: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  companyLogo: {
+    width: width * 0.6,
+    maxWidth: 220,
+    height: 56,
   },
   centerContent: {
     flex: 1,

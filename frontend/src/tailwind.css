@@ -1,0 +1,7 @@
+/**
+ * Tailwind CSS - PRD: Tailwind CSS for styling.
+ * Used for web build; imported in index.html.
+ */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

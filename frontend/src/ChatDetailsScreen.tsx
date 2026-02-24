@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,33 +6,81 @@ import {
   ScrollView,
   TextInput,
   TouchableOpacity,
+  Pressable,
   Image,
   StatusBar,
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Alert,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
+import { Audio } from 'expo-av';
 import { api } from './api/client';
+import { getSupabase, isSupabaseConfigured } from './lib/supabase';
 import { useAuth } from './context/AuthContext';
 import { useErrorHandler } from './hooks/useErrorHandler';
 import { useIsFocused } from '@react-navigation/native';
+import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import BottomNav from './BottomNav';
+import { colors, typography, spacing, borderRadius } from './theme';
+
+const VoiceMessageBubble = ({ url, isMine, onError }: { url: string; isMine: boolean; onError: () => void }) => {
+  const [playing, setPlaying] = useState(false);
+  const soundRef = useRef<Audio.Sound | null>(null);
+
+  const playPause = async () => {
+    try {
+      if (playing && soundRef.current) {
+        await soundRef.current.pauseAsync();
+        setPlaying(false);
+        return;
+      }
+      if (soundRef.current) {
+        await soundRef.current.playAsync();
+        setPlaying(true);
+        return;
+      }
+      const { sound } = await Audio.Sound.createAsync({ uri: url });
+      soundRef.current = sound;
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (status.isLoaded && status.didJustFinishAndNotLooped) {
+          setPlaying(false);
+          sound.unloadAsync().then(() => { soundRef.current = null; });
+        }
+      });
+      await sound.playAsync();
+      setPlaying(true);
+    } catch (e) {
+      onError();
+    }
+  };
+
+  return (
+    <TouchableOpacity style={styles.voiceBubble} onPress={playPause} activeOpacity={0.7}>
+      <Icon name={playing ? 'pause' : 'play'} size={24} color={isMine ? '#000' : THEME.text} />
+      <Text style={[styles.voiceLabel, isMine && styles.voiceLabelMine]}>Voice message</Text>
+    </TouchableOpacity>
+  );
+};
 
 const THEME = {
-  bg: "#F5F7F5",
-  primary: "#059669",
-  white: "#FFFFFF",
-  text: "#1A1A1A",
-  grayText: "#666666",
-  inputBg: "#F0F0F0",
-  sentBubble: "#059669",
-  receivedBubble: "#FFFFFF"
+  bg: colors.background,
+  primary: colors.primary,
+  white: colors.card,
+  text: colors.textPrimary,
+  grayText: colors.textSecondary,
+  inputBg: '#F0F0F0',
+  sentBubble: colors.secondary,
+  receivedBubble: colors.card,
 };
 
 const ChatDetailsScreen = ({ route, navigation }: any) => {
   const { user } = useAuth();
+  const isCareRecipient = user?.role === 'care_recipient' || (user as any)?.user_metadata?.role === 'care_recipient';
   const { chatSessionId, otherPartyName: initialName, otherPartyAvatar: initialAvatar } = route.params || {};
 
   const [otherPartyName, setOtherPartyName] = useState(initialName);
@@ -41,6 +89,10 @@ const ChatDetailsScreen = ({ route, navigation }: any) => {
   const [messages, setMessages] = useState<any[]>([]);
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(true);
+  const [remoteTyping, setRemoteTyping] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const recordingRef = useRef<Audio.Recording | null>(null);
   const [sending, setSending] = useState(false);
   const isFocused = useIsFocused();
   const scrollViewRef = useRef<ScrollView>(null);
@@ -106,25 +158,239 @@ const ChatDetailsScreen = ({ route, navigation }: any) => {
     }
   };
 
+  // Typing indicator: broadcast when user types, listen for others
+  const broadcastTyping = useCallback((isTyping: boolean) => {
+    if (!isSupabaseConfigured() || !chatSessionId) return;
+    const supabase = getSupabase();
+    if (!supabase) return;
+    const ch = supabase.channel(`chat:${chatSessionId}`);
+    ch.send({ type: 'broadcast', event: 'typing', payload: { userId: user?.id, typing: isTyping } }).catch(() => {});
+  }, [chatSessionId, user?.id]);
+
+  useEffect(() => {
+    if (inputText.trim().length > 0) {
+      broadcastTyping(true);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => {
+        broadcastTyping(false);
+        typingTimeoutRef.current = null;
+      }, 2000);
+    }
+    return () => {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    };
+  }, [inputText, broadcastTyping]);
+
   useEffect(() => {
     if (chatSessionId) {
       loadMessages();
       loadSessionDetails();
 
-      // Poll for new messages every 3 seconds when focused
-      pollIntervalRef.current = setInterval(async () => {
-        if (isFocused) {
-          await loadMessages(true);
+      // Supabase typing + real-time messages
+      let ch: any = null;
+      if (isSupabaseConfigured()) {
+        const supabase = getSupabase();
+        if (supabase) {
+          ch = supabase.channel(`chat:${chatSessionId}`)
+            .on('broadcast', { event: 'typing' }, (payload: { payload?: { userId?: string; typing?: boolean } }) => {
+              const p = payload?.payload;
+              if (p && p.userId !== user?.id && p.typing) {
+                setRemoteTyping(true);
+                setTimeout(() => setRemoteTyping(false), 3000);
+              }
+            })
+            .on('postgres_changes', {
+              event: 'INSERT',
+              schema: 'public',
+              table: 'messages',
+              filter: `chat_session_id=eq.${chatSessionId}`,
+            }, () => {
+              loadMessages(true);
+            })
+            .subscribe();
         }
-      }, 3000);
+      }
+
+      // Poll fallback when Supabase Realtime not available or table not replicated
+      pollIntervalRef.current = setInterval(async () => {
+        if (isFocused) await loadMessages(true);
+      }, 5000);
 
       return () => {
-        if (pollIntervalRef.current) {
-          clearInterval(pollIntervalRef.current);
-        }
+        if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+        if (ch?.unsubscribe) ch.unsubscribe();
       };
     }
-  }, [chatSessionId, isFocused]);
+  }, [chatSessionId, isFocused, user?.id]);
+
+  const sendVoiceMessage = useCallback(async (audioUri: string) => {
+    if (!audioUri || sending) return;
+    setSending(true);
+    clearError();
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMessage = {
+      id: tempId,
+      content: 'Voice message',
+      message_type: 'voice',
+      attachment_url: null,
+      sender_id: user?.id,
+      created_at: new Date().toISOString(),
+      sending: true,
+    };
+    setMessages(prev => [...prev, optimisticMessage]);
+    try {
+      const { url } = await api.uploadChatAttachment(chatSessionId, audioUri, 'voice.m4a', 'audio/mp4');
+      await api.sendMessage(chatSessionId, {
+        content: 'Voice message',
+        message_type: 'voice',
+        attachment_url: url,
+      });
+      await loadMessages(true);
+    } catch (e: any) {
+      handleError(e, 'chat-send-voice');
+      setMessages(prev => prev.filter(m => m.id !== tempId));
+      Alert.alert('Voice message failed', e?.message || 'Could not send voice message. Try again.');
+    } finally {
+      setSending(false);
+    }
+  }, [chatSessionId, user?.id, sending]);
+
+  const startVoiceRecording = useCallback(async () => {
+    try {
+      const { status } = await Audio.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Microphone access', 'Allow microphone access to record voice messages.');
+        return;
+      }
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+      const { recording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+      recordingRef.current = recording;
+      setRecording(true);
+    } catch (e: any) {
+      console.error('Start recording failed:', e);
+      Alert.alert('Recording failed', e?.message || 'Could not start recording.');
+    }
+  }, []);
+
+  const stopVoiceRecording = useCallback(async () => {
+    if (!recordingRef.current) return;
+    setRecording(false);
+    try {
+      await recordingRef.current.stopAndUnloadAsync();
+      const uri = recordingRef.current.getURI();
+      recordingRef.current = null;
+      if (uri) await sendVoiceMessage(uri);
+    } catch (e: any) {
+      console.error('Stop recording failed:', e);
+      recordingRef.current = null;
+    }
+  }, [sendVoiceMessage]);
+
+  const sendImageMessage = useCallback(async (imageUri: string) => {
+    if (!imageUri || sending) return;
+    setSending(true);
+    clearError();
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMessage = {
+      id: tempId,
+      content: 'Photo',
+      message_type: 'image',
+      attachment_url: imageUri,
+      sender_id: user?.id,
+      created_at: new Date().toISOString(),
+      sending: true,
+    };
+    setMessages(prev => [...prev, optimisticMessage]);
+    try {
+      const { url } = await api.uploadChatAttachment(chatSessionId, imageUri, 'photo.jpg', 'image/jpeg');
+      await api.sendMessage(chatSessionId, {
+        content: 'Photo',
+        message_type: 'image',
+        attachment_url: url,
+      });
+      await loadMessages(true);
+    } catch (e: any) {
+      handleError(e, 'chat-send-image');
+      setMessages(prev => prev.filter(m => m.id !== tempId));
+      Alert.alert('Photo failed', e?.message || 'Could not send photo. Try again.');
+    } finally {
+      setSending(false);
+    }
+  }, [chatSessionId, user?.id, sending]);
+
+  const pickAndSendDocument = useCallback(async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled || !result.assets?.[0]?.uri) return;
+      const asset = result.assets[0];
+      const fileName = asset.name || 'document.pdf';
+      const mimeType = asset.mimeType || 'application/pdf';
+      if (!asset.uri || sending) return;
+      setSending(true);
+      clearError();
+      const tempId = `temp-${Date.now()}`;
+      setMessages(prev => [...prev, {
+        id: tempId,
+        content: fileName,
+        message_type: 'document',
+        attachment_url: null,
+        sender_id: user?.id,
+        created_at: new Date().toISOString(),
+        sending: true,
+      }]);
+      try {
+        const { url } = await api.uploadChatAttachment(chatSessionId, asset.uri, fileName, mimeType);
+        await api.sendMessage(chatSessionId, {
+          content: fileName,
+          message_type: 'document',
+          attachment_url: url,
+        });
+        await loadMessages(true);
+      } catch (e: any) {
+        handleError(e, 'chat-send-document');
+        setMessages(prev => prev.filter(m => m.id !== tempId));
+        Alert.alert('Document failed', e?.message || 'Could not send document.');
+      } finally {
+        setSending(false);
+      }
+    } catch (e: any) {
+      console.error('Document pick failed:', e);
+      Alert.alert('Error', e?.message || 'Could not pick document.');
+    }
+  }, [chatSessionId, user?.id, sending]);
+
+  const pickAndSendImage = useCallback(async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission', 'Allow photo library access to share photos.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+      if (!result.canceled && result.assets?.[0]?.uri) {
+        await sendImageMessage(result.assets[0].uri);
+      }
+    } catch (e: any) {
+      console.error('Image pick failed:', e);
+      Alert.alert('Error', e?.message || 'Could not pick image.');
+    }
+  }, [sendImageMessage]);
 
   const sendMessage = async () => {
     if (!inputText.trim() || sending) return;
@@ -199,6 +465,16 @@ const ChatDetailsScreen = ({ route, navigation }: any) => {
         </View>
 
         <View style={styles.headerIcons}>
+          {isCareRecipient && (
+            <TouchableOpacity
+              style={[styles.iconBtn, styles.sosBtn]}
+              onPress={() => navigation.navigate('EmergencyScreen')}
+              accessibilityLabel="Emergency SOS"
+              accessibilityRole="button"
+            >
+              <Icon name="alert-octagon" size={22} color="#DC2626" />
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={styles.iconBtn}>
             <Icon name="phone-outline" size={24} color={THEME.text} />
           </TouchableOpacity>
@@ -243,6 +519,11 @@ const ChatDetailsScreen = ({ route, navigation }: any) => {
         style={{ flex: 1 }}
         keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
       >
+        {remoteTyping && (
+          <View style={styles.typingBanner}>
+            <Text style={styles.typingText}>{otherPartyName || 'Someone'} is typing...</Text>
+          </View>
+        )}
         <ScrollView
           ref={scrollViewRef}
           style={styles.content}
@@ -281,9 +562,40 @@ const ChatDetailsScreen = ({ route, navigation }: any) => {
                   {!isMine && !showAvatar && <View style={styles.avatarPlaceholder} />}
 
                   <View style={isMine ? styles.bubbleRight : styles.bubbleLeft}>
-                    <Text style={isMine ? styles.textRight : styles.textLeft}>
-                      {message.content}
-                    </Text>
+                    {message.message_type === 'voice' && message.attachment_url ? (
+                      <VoiceMessageBubble
+                        url={message.attachment_url}
+                        isMine={isMine}
+                        onError={() => {}}
+                      />
+                    ) : message.message_type === 'image' && message.attachment_url ? (
+                      <TouchableOpacity
+                        onPress={() => Linking.openURL(message.attachment_url)}
+                        activeOpacity={0.9}
+                      >
+                        <Image
+                          source={{ uri: message.attachment_url }}
+                          style={styles.chatImage}
+                          resizeMode="cover"
+                        />
+                      </TouchableOpacity>
+                    ) : message.message_type === 'document' && message.attachment_url ? (
+                      <TouchableOpacity
+                        style={styles.documentBubble}
+                        onPress={() => Linking.openURL(message.attachment_url)}
+                        activeOpacity={0.8}
+                      >
+                        <Icon name="file-document-outline" size={28} color={isMine ? '#000' : THEME.text} />
+                        <Text style={[styles.documentLabel, isMine && styles.documentLabelMine]} numberOfLines={2}>
+                          {message.content || 'Document'}
+                        </Text>
+                        <Icon name="download" size={18} color={isMine ? 'rgba(0,0,0,0.6)' : THEME.grayText} />
+                      </TouchableOpacity>
+                    ) : (
+                      <Text style={isMine ? styles.textRight : styles.textLeft}>
+                        {message.content}
+                      </Text>
+                    )}
                     <View style={isMine ? styles.readContainer : styles.timeContainer}>
                       <Text style={isMine ? styles.timeRight : styles.timeLeft}>
                         {formatTime(message.created_at)}
@@ -306,10 +618,34 @@ const ChatDetailsScreen = ({ route, navigation }: any) => {
 
         <View style={styles.footer}>
           <View style={styles.inputRow}>
-            <TouchableOpacity style={styles.plusBtn}>
-              <Icon name="plus" size={24} color={THEME.grayText} />
+            <TouchableOpacity
+              style={styles.plusBtn}
+              onPress={pickAndSendImage}
+              disabled={sending}
+              accessibilityLabel="Attach photo"
+              accessibilityRole="button"
+            >
+              <Icon name="image-plus" size={24} color={THEME.grayText} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.plusBtn}
+              onPress={pickAndSendDocument}
+              disabled={sending}
+              accessibilityLabel="Attach document"
+              accessibilityRole="button"
+            >
+              <Icon name="file-document-outline" size={24} color={THEME.grayText} />
             </TouchableOpacity>
 
+            <Pressable
+              style={styles.voiceBtn}
+              onPressIn={startVoiceRecording}
+              onPressOut={stopVoiceRecording}
+              disabled={sending}
+              accessibilityLabel={recording ? 'Release to send voice message' : 'Hold to record voice message'}
+            >
+              <Icon name="microphone" size={22} color={recording ? THEME.primary : THEME.grayText} />
+            </Pressable>
             <View style={styles.inputContainer}>
               <TextInput
                 placeholder="Type a message..."
@@ -385,11 +721,14 @@ const styles = StyleSheet.create({
   iconBtn: {
     marginLeft: 16,
   },
+  sosBtn: { marginLeft: 8 },
   videoBtn: {
     backgroundColor: '#E8F5E9',
     padding: 6,
     borderRadius: 20,
   },
+  typingBanner: { paddingHorizontal: 16, paddingVertical: 4, backgroundColor: '#F0F0F0' },
+  typingText: { fontSize: 12, color: THEME.grayText, fontStyle: 'italic' },
   content: {
     flex: 1,
     padding: 16,
@@ -477,12 +816,30 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: 'rgba(0,0,0,0.6)',
   },
+  voiceBubble: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  voiceLabel: { fontSize: 14, color: THEME.text },
+  voiceLabelMine: { color: '#000', fontWeight: '500' },
+  documentBubble: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+  },
+  documentLabel: { fontSize: 14, color: THEME.text, flex: 1 },
+  documentLabelMine: { color: '#000', fontWeight: '500' },
+  chatImage: { width: 200, height: 150, borderRadius: 12 },
   footer: {
     backgroundColor: THEME.white,
     paddingBottom: Platform.OS === 'ios' ? 20 : 10,
     borderTopWidth: 1,
     borderTopColor: '#EEE',
   },
+  voiceBtn: { padding: 8, justifyContent: 'center' },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',

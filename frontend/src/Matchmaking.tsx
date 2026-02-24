@@ -12,12 +12,16 @@ import {
   Dimensions,
   Alert,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRoute, useFocusEffect } from '@react-navigation/native';
 import { api } from './api/client';
+import { getCached, setCached } from './lib/apiCache';
 import BottomNav from './BottomNav';
+import LeafletMap from './components/LeafletMap';
+import { colors, typography, spacing, layout, borderRadius, shadows } from './theme';
 
 const { width } = Dimensions.get('window');
 
@@ -74,7 +78,7 @@ const parseDateTimeString = (dateTimeStr: string): Date | null => {
 
 const MatchmakingScreen = ({ navigation }: any) => {
   const route = useRoute<any>();
-  const { serviceType, assistanceType, examDateTime, dailyDateTime, examDuration, dailyDuration, locationText } =
+  const { serviceType, assistanceType, examDateTime, dailyDateTime, examDuration, dailyDuration, locationText, preferredCaregiverId } =
     route.params || {};
 
   // --- STATE MANAGEMENT ---
@@ -92,6 +96,7 @@ const MatchmakingScreen = ({ navigation }: any) => {
   // Filter States
   const [onlyOnline, setOnlyOnline] = useState(false);
   const [genderFilter, setGenderFilter] = useState('Any');
+  const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
 
   const [caregivers, setCaregivers] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -109,6 +114,11 @@ const MatchmakingScreen = ({ navigation }: any) => {
         setLoading(true);
         setError(null);
         try {
+          const cacheKey = '/api/caregivers';
+          const cached = await getCached<any[]>(cacheKey, { limit: '20' });
+          if (cached && Array.isArray(cached)) {
+            if (isActive) setCaregivers(cached);
+          }
           console.log('[Matchmaking] Loading caregivers...');
           const data = await api.listCaregivers({ limit: 20 });
           console.log('[Matchmaking] Received caregivers from API:', data);
@@ -135,6 +145,7 @@ const MatchmakingScreen = ({ navigation }: any) => {
               image: c.profile_photo_url || null,
               tags: profile?.skills || [],
               qualifications: profile?.qualifications || [],
+              languagesSpoken: profile?.languages_spoken || [],
               distance: 0,
               distanceStr: '',
               status: availability === 'available' ? 'online' : 'offline',
@@ -145,6 +156,7 @@ const MatchmakingScreen = ({ navigation }: any) => {
           console.log('[Matchmaking] Mapped caregivers for UI:', mapped.length);
           if (isActive) {
             setCaregivers(mapped);
+            await setCached(cacheKey, mapped, { limit: '20' });
           }
         } catch (e: any) {
           if (isActive) {
@@ -228,6 +240,15 @@ const MatchmakingScreen = ({ navigation }: any) => {
 
     if (genderFilter !== 'Any') data = data.filter(c => c.gender === genderFilter);
     if (onlyOnline) data = data.filter(c => c.status === 'online');
+
+    // PRD: Put preferred caregiver first when specified
+    if (preferredCaregiverId) {
+      const idx = data.findIndex((c: any) => c.id === preferredCaregiverId);
+      if (idx > 0) {
+        const [preferred] = data.splice(idx, 1);
+        data.unshift(preferred);
+      }
+    }
     return data;
   };
 
@@ -423,7 +444,9 @@ const MatchmakingScreen = ({ navigation }: any) => {
                             duration_hours: durationHours,
                             location: bookingLocation,
                             specific_requirements: route.params?.specificRequirements || assistanceType, // Use specificRequirements
-                            urgency_level: route.params?.urgencyLevel || 'medium'
+                            urgency_level: route.params?.urgencyLevel || 'medium',
+                            is_recurring: route.params?.isRecurring || false,
+                            recurring_pattern: route.params?.recurring_pattern || undefined,
                           });
                         }
 
@@ -477,7 +500,7 @@ const MatchmakingScreen = ({ navigation }: any) => {
               <Text style={styles.price}>₹{item.price}<Text style={styles.perHour}>/hr</Text></Text>
             </View>
             <View style={styles.ratingRow}>
-              <Ionicons name="star" size={14} color="#059669" />
+              <Ionicons name="star" size={14} color={colors.secondary} />
               <Text style={styles.ratingText}> {item.rating} <Text style={styles.reviews}>({item.reviews} reviews)</Text></Text>
             </View>
             <Text style={styles.roleText} numberOfLines={2}>{item.role}</Text>
@@ -493,7 +516,7 @@ const MatchmakingScreen = ({ navigation }: any) => {
         </View>
         <View style={styles.cardFooter}>
           <View style={styles.distanceRow}>
-            <Ionicons name="location-sharp" size={16} color="#666" />
+            <Ionicons name="location-sharp" size={16} color={colors.textSecondary} />
             <Text style={styles.distanceText}>{item.distanceStr}</Text>
           </View>
           <View style={styles.actionButtons}>
@@ -519,16 +542,16 @@ const MatchmakingScreen = ({ navigation }: any) => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      <StatusBar barStyle="dark-content" backgroundColor="#F5F7FA" />
+      <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
 
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="chevron-back" size={28} color="#000" />
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBtn} accessibilityLabel="Go back">
+          <Ionicons name="chevron-back" size={28} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Select Caregiver</Text>
-        <TouchableOpacity onPress={() => setFilterVisible(true)}>
-          <Ionicons name="options-outline" size={24} color="#000" />
+        <TouchableOpacity onPress={() => setFilterVisible(true)} style={styles.headerBtn} accessibilityLabel="Filters">
+          <Ionicons name="options-outline" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
       </View>
 
@@ -536,7 +559,7 @@ const MatchmakingScreen = ({ navigation }: any) => {
         <View style={styles.fastMatchContainer}>
           <View style={styles.fastMatchContent}>
             <View style={styles.fastMatchHeader}>
-              <Ionicons name="flash" size={18} color="#059669" />
+              <Ionicons name="flash" size={18} color={colors.secondary} />
               <Text style={styles.fastMatchTitle}> Fast Match</Text>
             </View>
             <Text style={styles.fastMatchDesc}>Instantly match with the highest-rated available caregiver.</Text>
@@ -553,7 +576,7 @@ const MatchmakingScreen = ({ navigation }: any) => {
         <View style={styles.filterRow}>
           {['Top Rated', 'Nearest', 'Lowest Price'].map((tab) => (
             <TouchableOpacity key={tab} style={[styles.filterChip, activeTab === tab && styles.filterChipActive]} onPress={() => setActiveTab(tab)}>
-              {activeTab === tab && <Ionicons name="checkmark" size={14} color="#059669" style={{ marginRight: 4 }} />}
+              {activeTab === tab && <Ionicons name="checkmark" size={14} color={colors.secondary} style={{ marginRight: 4 }} />}
               <Text style={activeTab === tab ? styles.filterTextActive : styles.filterText}>{tab}</Text>
             </TouchableOpacity>
           ))}
@@ -561,14 +584,43 @@ const MatchmakingScreen = ({ navigation }: any) => {
 
         <View style={styles.listHeader}>
           <Text style={styles.listTitle}>Available ({displayedCaregivers.length})</Text>
-          <TouchableOpacity onPress={handleViewMap}>
-            <Text style={styles.viewMapText}>View Map</Text>
-          </TouchableOpacity>
+          <View style={styles.viewToggle}>
+            <TouchableOpacity
+              style={[styles.viewToggleBtn, viewMode === 'list' && styles.viewToggleBtnActive]}
+              onPress={() => setViewMode('list')}
+            >
+              <Ionicons name="list" size={18} color={viewMode === 'list' ? '#FFF' : '#666'} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.viewToggleBtn, viewMode === 'map' && styles.viewToggleBtnActive]}
+              onPress={() => setViewMode('map')}
+            >
+              <Ionicons name="map" size={18} color={viewMode === 'map' ? '#FFF' : '#666'} />
+            </TouchableOpacity>
+          </View>
         </View>
 
-        <View style={styles.listContainer}>
-          {displayedCaregivers.map((item) => <View key={item.id}>{renderCaregiver({ item })}</View>)}
-        </View>
+        {viewMode === 'map' ? (
+          <View style={styles.mapContainer}>
+            <LeafletMap
+              center={{ lat: 17.385, lng: 78.4867 }}
+              zoom={13}
+              markers={[
+                { id: 'me', lat: 17.385, lng: 78.4867, label: 'You' },
+                ...displayedCaregivers.slice(0, 8).map((c, i) => ({
+                  id: c.id,
+                  lat: 17.385 + (i % 4) * 0.01 - 0.02,
+                  lng: 78.4867 + Math.floor(i / 4) * 0.01 - 0.01,
+                  label: c.name,
+                })),
+              ]}
+            />
+          </View>
+        ) : (
+          <View style={styles.listContainer}>
+            {displayedCaregivers.map((item) => <View key={item.id}>{renderCaregiver({ item })}</View>)}
+          </View>
+        )}
       </ScrollView>
 
       {/* FILTER MODAL */}
@@ -628,6 +680,20 @@ const MatchmakingScreen = ({ navigation }: any) => {
                 <View style={{ paddingHorizontal: 4 }}>
                   {(profileModalCaregiver.tags || []).length > 0 && (
                     <>
+                      {(profileModalCaregiver.languagesSpoken || []).length > 0 && (
+                    <>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#666', marginBottom: 6 }}>LANGUAGES SPOKEN</Text>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 12 }}>
+                        {(profileModalCaregiver.languagesSpoken || []).map((lang: string, i: number) => (
+                          <View key={i} style={[styles.tag, { marginRight: 6, marginBottom: 6 }]}>
+                            <Text style={styles.tagText}>{lang}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </>
+                  )}
+                  {(profileModalCaregiver.tags || []).length > 0 && (
+                    <>
                       <Text style={{ fontSize: 12, fontWeight: '700', color: '#666', marginBottom: 6 }}>SKILLS</Text>
                       <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 12 }}>
                         {(profileModalCaregiver.tags || []).map((tag: string, i: number) => (
@@ -674,30 +740,35 @@ const MatchmakingScreen = ({ navigation }: any) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F5F7FA' },
-  scrollContainer: { paddingBottom: 120 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 15, backgroundColor: '#F5F7FA' },
-  headerTitle: { fontSize: 18, fontWeight: '700' },
-  fastMatchContainer: { marginHorizontal: 20, backgroundColor: '#FFF', borderRadius: 16, padding: 20, flexDirection: 'row', justifyContent: 'space-between', overflow: 'hidden', shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 10, marginBottom: 20 },
+  container: { flex: 1, backgroundColor: colors.background },
+  scrollContainer: { paddingBottom: 120, paddingHorizontal: layout.screenPadding },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: layout.screenPadding, paddingVertical: spacing.lg, backgroundColor: colors.background },
+  headerBtn: { minWidth: 48, minHeight: 48, justifyContent: 'center', alignItems: 'center' },
+  headerTitle: { fontSize: typography.headingSmall, fontWeight: typography.weightBold, color: colors.textPrimary },
+  fastMatchContainer: { backgroundColor: colors.card, borderRadius: borderRadius.lg, padding: spacing.lg, flexDirection: 'row', justifyContent: 'space-between', overflow: 'hidden', marginBottom: layout.sectionGap, ...shadows.card },
   fastMatchContent: { flex: 0.7 },
   fastMatchHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 5 },
   fastMatchTitle: { fontWeight: '800', fontSize: 16 },
-  fastMatchDesc: { fontSize: 12, color: '#666', marginBottom: 15, lineHeight: 18 },
-  autoAssignBtn: { backgroundColor: '#059669', paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
-  autoAssignText: { fontWeight: '800', fontSize: 13, color: '#FFF' },
+  fastMatchDesc: { fontSize: typography.bodySmall, color: colors.textSecondary, marginBottom: spacing.lg, lineHeight: 20 },
+  autoAssignBtn: { backgroundColor: colors.secondary, paddingVertical: 14, borderRadius: borderRadius.md, alignItems: 'center', minHeight: 48, justifyContent: 'center' },
+  autoAssignText: { fontWeight: typography.weightBold, fontSize: typography.body, color: colors.card },
   graphicPlaceholder: { width: 80, height: 80, backgroundColor: '#064E3B', borderRadius: 8, overflow: 'hidden', justifyContent: 'center' },
   graphicLine1: { height: 10, backgroundColor: '#34D399', marginBottom: 10, opacity: 0.5, transform: [{ rotate: '-10deg' }], width: 100, marginLeft: -10 },
   graphicLine2: { height: 20, backgroundColor: '#34D399', opacity: 0.8, transform: [{ rotate: '-5deg' }], width: 100, marginLeft: -10 },
-  filterRow: { flexDirection: 'row', paddingHorizontal: 20, marginBottom: 20 },
+  filterRow: { flexDirection: 'row', marginBottom: layout.sectionGap, flexWrap: 'wrap', gap: spacing.sm },
   filterChip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: '#FFF', marginRight: 10, borderWidth: 1, borderColor: '#FFF', shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 2 },
   filterChipActive: { borderColor: '#059669', flexDirection: 'row', alignItems: 'center', backgroundColor: '#D1FAE5' },
   filterText: { fontSize: 13, fontWeight: '600', color: '#666' },
   filterTextActive: { fontSize: 13, fontWeight: '700', color: '#059669' },
-  listHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, marginBottom: 15 },
+  listHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: layout.cardGap },
   listTitle: { fontSize: 18, fontWeight: '800' },
   viewMapText: { color: '#059669', fontWeight: '700', fontSize: 13 },
-  listContainer: { paddingHorizontal: 20 },
-  card: { backgroundColor: '#FFF', borderRadius: 16, padding: 15, marginBottom: 15, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 5 },
+  viewToggle: { flexDirection: 'row', gap: 4 },
+  viewToggleBtn: { padding: 8, borderRadius: 8, backgroundColor: '#EEE' },
+  viewToggleBtnActive: { backgroundColor: '#059669' },
+  mapContainer: { height: 320, borderRadius: borderRadius.lg, overflow: 'hidden', marginBottom: layout.cardGap },
+  listContainer: {},
+  card: { backgroundColor: colors.card, borderRadius: borderRadius.lg, padding: spacing.lg, marginBottom: layout.cardGap, ...shadows.card },
   cardHeader: { flexDirection: 'row', marginBottom: 12 },
   avatar: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#EEE' },
   avatarPlaceholder: {

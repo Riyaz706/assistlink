@@ -226,6 +226,7 @@ async def get_emergency_status(
             "status": "unknown",
             "message": "Emergency tracking not set up (table missing).",
             "caregiver": None,
+            "care_recipient": None,
             "location": None
         }
 
@@ -240,11 +241,14 @@ async def get_emergency_status(
                 "status": "unknown",
                 "message": "Emergency not found.",
                 "caregiver": None,
+                "care_recipient": None,
                 "location": None
             }
         row = res.data[0]
         caregiver = None
+        care_recipient = None
         ack_by = row.get("caregiver_id")
+        cr_id = row.get("user_id")
         if ack_by:
             try:
                 ur = supabase_admin.table("users").select("id, full_name, profile_photo_url, phone").eq("id", ack_by).limit(1).execute()
@@ -252,11 +256,19 @@ async def get_emergency_status(
                     caregiver = ur.data[0]
             except Exception:
                 pass
+        if cr_id:
+            try:
+                cr_res = supabase_admin.table("users").select("id, full_name, profile_photo_url, phone, address").eq("id", cr_id).limit(1).execute()
+                if cr_res.data and len(cr_res.data) > 0:
+                    care_recipient = cr_res.data[0]
+            except Exception:
+                pass
         return {
             "id": row.get("id"),
             "status": row.get("status", "unknown"),
             "message": None,
             "caregiver": caregiver,
+            "care_recipient": care_recipient,
             "location": row.get("location")
         }
     except Exception as e:
@@ -267,5 +279,6 @@ async def get_emergency_status(
             "status": "unknown",
             "message": "Could not load status.",
             "caregiver": None,
+            "care_recipient": None,
             "location": None
         }

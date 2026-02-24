@@ -210,3 +210,25 @@ async def upload_profile_photo(
             detail=f"Upload failed: {str(e)}",
         )
 
+
+@router.delete("/profile")
+async def delete_account(current_user: dict = Depends(get_current_user)):
+    """Permanently delete the current user's account and all associated data."""
+    try:
+        user_id = get_user_id(current_user)
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid user data: user ID not found",
+            )
+        user_id_str = str(user_id)
+        supabase_admin.auth.admin.delete_user(user_id_str)
+        return {"message": "Account deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        )
+

@@ -20,6 +20,9 @@ Use this when Render asks for env vars (Deploy Blueprint / Environment tab). **Y
 | **GOOGLE_WEB_CLIENT_ID** | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) → OAuth 2.0 Client ID (Web) | Required for Google sign-in |
 | **GOOGLE_IOS_CLIENT_ID** | Same → OAuth client (iOS) if you have one | Optional; can match Web |
 | **GOOGLE_ANDROID_CLIENT_ID** | Same → OAuth client (Android), package `com.assistlink.app` | Required for Google sign-in on Android app |
+| **RAZORPAY_KEY_ID** | [Razorpay Dashboard](https://dashboard.razorpay.com) → Settings → API Keys | For real payments (e.g. `rzp_test_xxx`) |
+| **RAZORPAY_KEY_SECRET** | Same page → Key Secret | For real Razorpay payments |
+| **RAZORPAY_BYPASS_MODE** | Set to `false` for real payments, `true` to skip Razorpay | `false` = real checkout |
 
 ---
 
@@ -70,6 +73,20 @@ If **Google sign-in is not working** on the deployed app, the backend must have 
 4. **GOOGLE_IOS_CLIENT_ID**: Your iOS client ID if you use iOS; can be the same as Web for testing.
 
 Add all three in Render → **Environment** → Save and redeploy. The backend verifies the Google ID token against these client IDs; if any is missing, token verification fails and you get “Invalid Google ID token”.
+
+### Razorpay (optional — for real-time payments)
+
+To enable **real Razorpay payments** (not bypass mode):
+
+1. Go to [Razorpay Dashboard](https://dashboard.razorpay.com) → **Settings** → **API Keys**
+2. Copy **Key ID** (`rzp_test_xxx` for test, `rzp_live_xxx` for production) and **Key Secret**
+3. In Render → **Environment**, add:
+   - `RAZORPAY_KEY_ID` = your Key ID
+   - `RAZORPAY_KEY_SECRET` = your Key Secret
+   - `RAZORPAY_BYPASS_MODE` = `false`
+4. Save and redeploy
+
+See `docs/RAZORPAY_REAL_SETUP.md` for full setup and webhook configuration.
 
 ### Twilio (optional — for video/SMS)
 

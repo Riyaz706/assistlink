@@ -15,28 +15,50 @@ import {
   Linking,
   TextInput,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from './context/AuthContext';
 import { useTheme } from './context/ThemeContext';
 import { colors as defaultColors, typography, spacing } from './theme';
 import BottomNav from './BottomNav';
 import { apiConfigReady, getCurrentApiBaseUrl, getDefaultApiUrl, setApiBaseUrlOverride, checkBackendConnection } from './api/client';
+import * as Camera from 'expo-camera';
+import * as Location from 'expo-location';
+import * as Notifications from 'expo-notifications';
+import { Audio } from 'expo-av';
+import { invalidateCache } from './lib/apiCache';
+import * as SecureStore from 'expo-secure-store';
+import { useTranslation } from 'react-i18next';
+import { LANGUAGES, getStoredLanguage, type LanguageCode } from './i18n';
 
 const NOTIFICATIONS_PREF_KEY = 'assistlink_notifications_enabled';
+const PRIVACY_PROFILE_VISIBLE_KEY = 'assistlink_privacy_profile_visible';
+const PRIVACY_SHARE_LOCATION_KEY = 'assistlink_privacy_share_location';
 
 const SettingsScreen = ({ navigation }: any) => {
   const { logout } = useAuth();
+  const { t } = useTranslation();
   const { colors, largeText, highContrast, setLargeText, setHighContrast } = useTheme();
+  const [currentLang, setCurrentLang] = useState<LanguageCode>('en');
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [notificationsLoaded, setNotificationsLoaded] = useState(false);
   const [backendUrl, setBackendUrl] = useState('');
   const [backendUrlLoaded, setBackendUrlLoaded] = useState(false);
   const [savingUrl, setSavingUrl] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
+  const [profileVisible, setProfileVisible] = useState(true);
+  const [shareLocation, setShareLocation] = useState(true);
+  const [privacyLoaded, setPrivacyLoaded] = useState(false);
+  const [permissions, setPermissions] = useState<{
+    camera?: string;
+    microphone?: string;
+    location?: string;
+    notifications?: string;
+  }>({});
 
   useEffect(() => {
     (async () => {
@@ -59,6 +81,59 @@ const SettingsScreen = ({ navigation }: any) => {
     })();
   }, []);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const pv = await AsyncStorage.getItem(PRIVACY_PROFILE_VISIBLE_KEY);
+        const sl = await AsyncStorage.getItem(PRIVACY_SHARE_LOCATION_KEY);
+        if (pv !== null) setProfileVisible(pv === 'true');
+        if (sl !== null) setShareLocation(sl === 'true');
+      } catch {
+        // use defaults
+      } finally {
+        setPrivacyLoaded(true);
+      }
+    })();
+  }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      getStoredLanguage().then(setCurrentLang);
+    }, [])
+  );
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [cam, mic, loc, notif] = await Promise.all([
+          Camera.getCameraPermissionsAsync().then(p => p.status),
+          Audio.getPermissionsAsync().then(p => p.status),
+          Location.getForegroundPermissionsAsync().then(p => p.status),
+          Notifications.getPermissionsAsync().then(p => p.status),
+        ]);
+        setPermissions({ camera: cam, microphone: mic, location: loc, notifications: notif });
+      } catch {
+        setPermissions({});
+      }
+    })();
+  }, []);
+
+  const setProfileVisibleAndPersist = async (value: boolean) => {
+    setProfileVisible(value);
+    try {
+      await AsyncStorage.setItem(PRIVACY_PROFILE_VISIBLE_KEY, String(value));
+    } catch (e) {
+      console.warn('Failed to save profile visibility', e);
+    }
+  };
+  const setShareLocationAndPersist = async (value: boolean) => {
+    setShareLocation(value);
+    try {
+      await AsyncStorage.setItem(PRIVACY_SHARE_LOCATION_KEY, String(value));
+    } catch (e) {
+      console.warn('Failed to save share location', e);
+    }
+  };
   const setNotificationsEnabledAndPersist = async (value: boolean) => {
     setNotificationsEnabled(value);
     try {
@@ -187,13 +262,98 @@ const SettingsScreen = ({ navigation }: any) => {
             label="Language"
             right={
               <View style={styles.valueRow}>
-                <Text style={[styles.valueText, { color: colors.textSecondary }]}>English</Text>
+                <Text style={[styles.valueText, { color: colors.textSecondary }]}>
+                  {LANGUAGES.find(l => l.code === currentLang)?.native ?? 'English'}
+                </Text>
                 <Icon name="chevron-right" size={24} color={colors.textSecondary} />
               </View>
             }
-            onPress={() => Alert.alert('Language', 'English is the only supported language at this time.')}
+            onPress={() => navigation.navigate('LanguagePicker')}
             isLast={true}
           />
+        </View>
+
+        <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>PRIVACY</Text>
+        <View style={[styles.card, { backgroundColor: colors.card }]}>
+          <Item
+            icon="account-eye"
+            iconColor={colors.primary}
+            label="Profile visible to caregivers"
+            right={
+              privacyLoaded ? (
+                <Switch
+                  value={profileVisible}
+                  onValueChange={setProfileVisibleAndPersist}
+                  trackColor={{ false: colors.border, true: colors.primary }}
+                  thumbColor={colors.card}
+                  accessibilityLabel="Profile visibility"
+                  accessibilityRole="switch"
+                />
+              ) : null
+            }
+            isLast={false}
+          />
+          <Item
+            icon="map-marker"
+            iconColor={colors.secondary}
+            label="Share location with caregivers"
+            right={
+              privacyLoaded ? (
+                <Switch
+                  value={shareLocation}
+                  onValueChange={setShareLocationAndPersist}
+                  trackColor={{ false: colors.border, true: colors.secondary }}
+                  thumbColor={colors.card}
+                  accessibilityLabel="Share location"
+                  accessibilityRole="switch"
+                />
+              ) : null
+            }
+            isLast={true}
+          />
+        </View>
+
+        <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>APP PERMISSIONS</Text>
+        <View style={[styles.card, { backgroundColor: colors.card }]}>
+          <View style={styles.permRow}>
+            <Icon name="camera" size={22} color={colors.primary} />
+            <Text style={[styles.permLabel, { color: colors.textPrimary }]}>Camera</Text>
+            <View style={[styles.permBadge, { backgroundColor: permissions.camera === 'granted' ? '#059669' : '#F59E0B' }]}>
+              <Text style={styles.permBadgeText}>{permissions.camera === 'granted' ? 'Allowed' : permissions.camera === 'denied' ? 'Denied' : 'Ask'}</Text>
+            </View>
+          </View>
+          <View style={styles.permRow}>
+            <Icon name="microphone" size={22} color={colors.primary} />
+            <Text style={[styles.permLabel, { color: colors.textPrimary }]}>Microphone</Text>
+            <View style={[styles.permBadge, { backgroundColor: permissions.microphone === 'granted' ? '#059669' : '#F59E0B' }]}>
+              <Text style={styles.permBadgeText}>{permissions.microphone === 'granted' ? 'Allowed' : permissions.microphone === 'denied' ? 'Denied' : 'Ask'}</Text>
+            </View>
+          </View>
+          <View style={styles.permRow}>
+            <Icon name="map-marker" size={22} color={colors.primary} />
+            <Text style={[styles.permLabel, { color: colors.textPrimary }]}>Location</Text>
+            <View style={[styles.permBadge, { backgroundColor: permissions.location === 'granted' ? '#059669' : '#F59E0B' }]}>
+              <Text style={styles.permBadgeText}>{permissions.location === 'granted' ? 'Allowed' : permissions.location === 'denied' ? 'Denied' : 'Ask'}</Text>
+            </View>
+          </View>
+          <View style={styles.permRow}>
+            <Icon name="bell" size={22} color={colors.primary} />
+            <Text style={[styles.permLabel, { color: colors.textPrimary }]}>Notifications</Text>
+            <View style={[styles.permBadge, { backgroundColor: permissions.notifications === 'granted' ? '#059669' : '#F59E0B' }]}>
+              <Text style={styles.permBadgeText}>{permissions.notifications === 'granted' ? 'Allowed' : permissions.notifications === 'denied' ? 'Denied' : 'Ask'}</Text>
+            </View>
+          </View>
+          {Platform.OS !== 'web' && (
+            <TouchableOpacity
+              style={[styles.permButton, { backgroundColor: colors.primary }]}
+              onPress={() => Linking.openSettings()}
+              accessibilityLabel="Open app settings"
+              accessibilityRole="button"
+            >
+              <Icon name="cog" size={20} color="#fff" />
+              <Text style={styles.permButtonText}>Open App Settings</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>CONNECTION</Text>
@@ -288,6 +448,71 @@ const SettingsScreen = ({ navigation }: any) => {
           )}
         </View>
 
+        <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>CACHE & BIOMETRICS</Text>
+        <View style={[styles.card, { backgroundColor: colors.card }]}>
+          <Item
+            icon="database-off"
+            iconColor={colors.textSecondary}
+            label="Clear cached data"
+            onPress={async () => {
+              try {
+                await invalidateCache();
+                Alert.alert('Done', 'Cached data cleared. Fresh data will load on next visit.');
+              } catch (e) {
+                Alert.alert('Error', 'Could not clear cache.');
+              }
+            }}
+            isLast={Platform.OS === 'web'}
+          />
+          {Platform.OS !== 'web' && (
+            <Item
+              icon="fingerprint-off"
+              iconColor={colors.textSecondary}
+              label="Disable biometric sign-in"
+              onPress={async () => {
+                try {
+                  await SecureStore.deleteItemAsync('assistlink_biometric_refresh');
+                  Alert.alert('Done', 'Biometric sign-in disabled. You will need to sign in with password next time.');
+                } catch (e) {
+                  Alert.alert('Error', 'Could not disable biometrics.');
+                }
+              }}
+              isLast={true}
+            />
+          )}
+        </View>
+
+        <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>DANGER ZONE</Text>
+        <View style={[styles.card, { backgroundColor: colors.card }]}>
+          <Item
+            icon="account-remove"
+            iconColor={colors.error}
+            label="Delete account"
+            onPress={() => {
+              Alert.alert(
+                'Delete account',
+                'This action cannot be undone. All your data will be permanently deleted. Are you sure?',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: async () => {
+                      try {
+                        await api.deleteAccount();
+                        await logout();
+                      } catch (e: any) {
+                        Alert.alert('Error', e?.message || 'Could not delete account.');
+                      }
+                    },
+                  },
+                ]
+              );
+            }}
+            isLast={true}
+          />
+        </View>
+
         <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>SUPPORT</Text>
         <View style={[styles.card, { backgroundColor: colors.card }]}>
           <Item
@@ -379,6 +604,34 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   urlButtonText: { color: '#fff', fontWeight: '600', fontSize: typography.body },
+  permRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.06)',
+  },
+  permLabel: { flex: 1, fontSize: 16, marginLeft: 12 },
+  permHint: { fontSize: 12, marginLeft: 8 },
+  permBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  permBadgeText: { color: '#fff', fontSize: 12, fontWeight: '600' },
+  permButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 12,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.md,
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  permButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 });
 
 export default SettingsScreen;

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from uuid import UUID
@@ -59,8 +59,30 @@ class UserCreate(UserBase):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    """Accept email or phone for PRD: Login with email/phone input."""
+    email: Optional[str] = None
+    phone: Optional[str] = None
     password: str = Field(..., min_length=1)
+
+    @field_validator('email')
+    @classmethod
+    def validate_email_login(cls, v):
+        if v:
+            return validate_email(v)
+        return v
+
+    @field_validator('phone')
+    @classmethod
+    def validate_phone_login(cls, v):
+        if v:
+            return validate_phone(v)
+        return v
+
+    @model_validator(mode='after')
+    def require_email_or_phone(self):
+        if not self.email and not self.phone:
+            raise ValueError("Please provide email or phone number.")
+        return self
 
 
 class PasswordChangeRequest(BaseModel):
@@ -97,6 +119,7 @@ class CaregiverProfileBase(BaseModel):
     experience_years: Optional[int] = None
     bio: Optional[str] = None
     hourly_rate: Optional[float] = None
+    languages_spoken: Optional[List[str]] = None  # PRD: Languages spoken
 
     @field_validator('bio')
     @classmethod
@@ -376,7 +399,7 @@ class DashboardStats(BaseModel):
 # Message Schemas
 class MessageCreate(BaseModel):
     content: str = Field(..., min_length=1)
-    message_type: str = Field(default="text", pattern="^(text|image|document)$")
+    message_type: str = Field(default="text", pattern="^(text|image|document|voice)$")
     attachment_url: Optional[str] = None
     
     @field_validator('content')

@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar, KeyboardAvoidingView, Platform, ScrollView, Dimensions, Image } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, StatusBar, KeyboardAvoidingView, Platform, ScrollView, Dimensions, Image, Modal, Switch } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as WebBrowser from 'expo-web-browser';
 import { useAuth } from './context/AuthContext';
 import { useGoogleAuth } from './hooks/useGoogleAuth';
@@ -15,6 +16,7 @@ import { MaterialCommunityIcons as Icon } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors as themeColors, typography as themeTypography, accessibility as themeA11y } from './theme';
 import { useTheme } from './context/ThemeContext';
+import { useAccessibility } from './context/AccessibilityContext';
 
 const COLORS = {
   background: themeColors.background,
@@ -29,12 +31,60 @@ const COLORS = {
 
 const { width } = Dimensions.get('window');
 
+const REMEMBER_ME_KEY = 'assistlink_login_remember_email';
+const REMEMBER_ME_CHECKED_KEY = 'assistlink_login_remember_me';
+
 const LoginScreen = ({ navigation }: any) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
+  const [useBiometrics, setUseBiometrics] = useState(false);
+  const [hasStoredBiometric, setHasStoredBiometric] = useState(false);
+  const [biometricType, setBiometricType] = useState<string>('');
+  const [rolePreference, setRolePreference] = useState<'user' | 'caregiver'>('user');
+  const [accessibilityModalVisible, setAccessibilityModalVisible] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { login, googleLogin } = useAuth();
+  const { login, loginWithBiometrics, googleLogin } = useAuth();
+  const { largeText, highContrast, setLargeText, setHighContrast } = useAccessibility();
+
+  useEffect(() => {
+    AsyncStorage.getItem(REMEMBER_ME_CHECKED_KEY).then((v) => {
+      if (v === 'true') setRememberMe(true);
+    });
+    AsyncStorage.getItem(REMEMBER_ME_KEY).then((v) => {
+      if (v) setEmail(v);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    (async () => {
+      try {
+        const { hasHardwareAsync, supportedAuthenticationTypesAsync } = await import('expo-local-authentication');
+        const hasHardware = await hasHardwareAsync();
+        if (!hasHardware) return;
+        const types = await supportedAuthenticationTypesAsync();
+        const SecureStore = (await import('expo-secure-store')).default;
+        const stored = await SecureStore.getItemAsync('assistlink_biometric_refresh');
+        if (stored) {
+          setHasStoredBiometric(true);
+          setBiometricType(Array.isArray(types) && types.includes(2) ? 'Face ID' : Array.isArray(types) && types.includes(1) ? 'Fingerprint' : 'Biometrics');
+        }
+      } catch {
+        // Biometrics not available
+      }
+    })();
+  }, []);
+
+  const onRememberMeChange = (value: boolean) => {
+    setRememberMe(value);
+    if (value) AsyncStorage.setItem(REMEMBER_ME_CHECKED_KEY, 'true');
+    else {
+      AsyncStorage.removeItem(REMEMBER_ME_CHECKED_KEY);
+      AsyncStorage.removeItem(REMEMBER_ME_KEY);
+    }
+  };
   const { signInWithGoogle, loading: googleLoading, isReady: googleReady } = useGoogleAuth();
   const { error, handleError, clearError } = useErrorHandler();
   const { colors: themeColorsResolved, typography: themeTypography } = useTheme();
@@ -79,7 +129,10 @@ const LoginScreen = ({ navigation }: any) => {
 
     setLoading(true);
     try {
-      await login(email.trim(), password);
+      await login(email.trim(), password, { useBiometrics });
+      if (rememberMe) {
+        AsyncStorage.setItem(REMEMBER_ME_KEY, email.trim());
+      }
       // Navigation handled by RootNavigator based on role
     } catch (e: any) {
       const errorDetails = handleError(e, 'login');
@@ -108,15 +161,45 @@ const LoginScreen = ({ navigation }: any) => {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}>
 
-          {/* Header Back Button */}
-          <View style={styles.header}>
+          {/* Header: Back + Accessibility (PRD: Accessibility quick-access button) */}
+          <View style={[styles.header, styles.headerRow]}>
             <TouchableOpacity
-              onPress={() => navigation.goBack()}
+              onPress={() => { try { navigation.goBack(); } catch (_) {} }}
               style={styles.backButton}
               accessibilityLabel="Go back"
               accessibilityRole="button"
             >
               <Icon name="arrow-left" size={26} color={COLORS.darkText} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setAccessibilityModalVisible(true)}
+              style={styles.accessibilityButton}
+              accessibilityLabel="Accessibility options"
+              accessibilityRole="button"
+            >
+              <Icon name="accessibility" size={24} color={COLORS.primaryGreen} />
+            </TouchableOpacity>
+          </View>
+
+          {/* Role selection toggle (PRD: User/Caregiver) */}
+          <View style={styles.roleToggleContainer}>
+            <TouchableOpacity
+              style={[styles.roleTab, rolePreference === 'user' && styles.roleTabActive]}
+              onPress={() => setRolePreference('user')}
+              accessibilityLabel="Log in as User"
+              accessibilityRole="tab"
+              accessibilityState={{ selected: rolePreference === 'user' }}
+            >
+              <Text style={[styles.roleTabText, rolePreference === 'user' && styles.roleTabTextActive]}>User</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.roleTab, rolePreference === 'caregiver' && styles.roleTabActive]}
+              onPress={() => setRolePreference('caregiver')}
+              accessibilityLabel="Log in as Caregiver"
+              accessibilityRole="tab"
+              accessibilityState={{ selected: rolePreference === 'caregiver' }}
+            >
+              <Text style={[styles.roleTabText, rolePreference === 'caregiver' && styles.roleTabTextActive]}>Caregiver</Text>
             </TouchableOpacity>
           </View>
 
@@ -135,10 +218,40 @@ const LoginScreen = ({ navigation }: any) => {
             </Text>
           </View>
 
+          {hasStoredBiometric && (
+            <TouchableOpacity
+              style={styles.biometricButton}
+              onPress={async () => {
+                try {
+                  const { authenticateAsync } = await import('expo-local-authentication');
+                  const { success } = await authenticateAsync({
+                    promptMessage: `Sign in with ${biometricType}`,
+                    cancelLabel: 'Cancel',
+                  });
+                  if (success) {
+                    setLoading(true);
+                    clearError();
+                    await loginWithBiometrics();
+                  }
+                } catch (e: any) {
+                  handleError(e, 'biometric-login');
+                } finally {
+                  setLoading(false);
+                }
+              }}
+              disabled={loading}
+              accessibilityLabel={`Sign in with ${biometricType}`}
+              accessibilityRole="button"
+            >
+              <Icon name={biometricType === 'Face ID' ? 'face-recognition' : 'fingerprint'} size={28} color={COLORS.primaryGreen} />
+              <Text style={styles.biometricButtonText}>Sign in with {biometricType}</Text>
+            </TouchableOpacity>
+          )}
+
           {/* Input Fields */}
           <View style={styles.formContainer}>
             <View style={styles.inputWrapper}>
-              <Text style={styles.label}>Email or Username</Text>
+              <Text style={styles.label}>Email or Phone</Text>
               <View style={styles.inputContainer}>
                 <Icon name="email-outline" size={20} color={COLORS.placeholder} style={styles.inputIcon} />
                 <TextInput
@@ -149,7 +262,7 @@ const LoginScreen = ({ navigation }: any) => {
                   autoCapitalize="none"
                   value={email}
                   onChangeText={setEmail}
-                  accessibilityLabel="Email or username"
+                  accessibilityLabel="Email or phone"
                   accessibilityHint="Enter your email address to sign in"
                 />
               </View>
@@ -184,14 +297,43 @@ const LoginScreen = ({ navigation }: any) => {
               </View>
             </View>
 
-            <TouchableOpacity
-              style={styles.forgotButton}
-              onPress={() => navigation.navigate('ForgotPassword')}
-              accessibilityLabel="Forgot password"
-              accessibilityRole="link"
-            >
-              <Text style={styles.forgotText}>Forgot Password?</Text>
-            </TouchableOpacity>
+            <View style={styles.rememberForgotRow}>
+              <View style={styles.checkboxGroup}>
+                <TouchableOpacity
+                  style={styles.rememberMeRow}
+                  onPress={() => onRememberMeChange(!rememberMe)}
+                  accessibilityLabel={rememberMe ? 'Remember me checked' : 'Remember me unchecked'}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: rememberMe }}
+                >
+                  <View style={[styles.checkbox, rememberMe && styles.checkboxChecked]}>
+                    {rememberMe && <Icon name="check" size={14} color="#FFF" />}
+                  </View>
+                  <Text style={styles.rememberMeText}>Remember me</Text>
+                </TouchableOpacity>
+                {Platform.OS !== 'web' && (
+                  <TouchableOpacity
+                    style={[styles.rememberMeRow, { marginTop: 8 }]}
+                    onPress={() => setUseBiometrics(!useBiometrics)}
+                    accessibilityLabel={useBiometrics ? 'Use biometrics checked' : 'Use biometrics unchecked'}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: useBiometrics }}
+                  >
+                    <View style={[styles.checkbox, useBiometrics && styles.checkboxChecked]}>
+                      {useBiometrics && <Icon name="check" size={14} color="#FFF" />}
+                    </View>
+                    <Text style={styles.rememberMeText}>Use biometrics for next sign-in</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              <TouchableOpacity
+                onPress={() => navigation.navigate('ForgotPassword')}
+                accessibilityLabel="Forgot password"
+                accessibilityRole="link"
+              >
+                <Text style={styles.forgotText}>Forgot Password?</Text>
+              </TouchableOpacity>
+            </View>
 
             {error ? (
               <View style={styles.errorContainer}>
@@ -257,6 +399,26 @@ const LoginScreen = ({ navigation }: any) => {
 
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Accessibility Quick-Access Modal (PRD) */}
+      <Modal visible={accessibilityModalVisible} transparent animationType="fade">
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setAccessibilityModalVisible(false)}>
+          <View style={styles.accessibilityModal} onStartShouldSetResponder={() => true}>
+            <Text style={styles.modalTitle}>Accessibility</Text>
+            <View style={styles.accessibilityRow}>
+              <Text style={styles.accessibilityLabel}>Large text</Text>
+              <Switch value={largeText} onValueChange={setLargeText} trackColor={{ false: '#ccc', true: COLORS.primaryGreen }} />
+            </View>
+            <View style={styles.accessibilityRow}>
+              <Text style={styles.accessibilityLabel}>High contrast</Text>
+              <Switch value={highContrast} onValueChange={setHighContrast} trackColor={{ false: '#ccc', true: COLORS.primaryGreen }} />
+            </View>
+            <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setAccessibilityModalVisible(false)}>
+              <Text style={styles.modalCloseText}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -293,6 +455,116 @@ const styles = StyleSheet.create({
   header: {
     marginTop: Platform.OS === 'android' ? 20 : 10,
     marginBottom: 20,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  accessibilityButton: {
+    minWidth: themeA11y.minTouchTargetSize,
+    minHeight: themeA11y.minTouchTargetSize,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  roleToggleContainer: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.inputBorder,
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 24,
+  },
+  roleTab: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderRadius: 10,
+  },
+  roleTabActive: {
+    backgroundColor: COLORS.card,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  roleTabText: {
+    fontSize: 16,
+    color: COLORS.grayText,
+    fontWeight: '500',
+  },
+  roleTabTextActive: {
+    color: COLORS.primaryGreen,
+    fontWeight: '600',
+  },
+  rememberForgotRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  checkboxGroup: { flex: 1 },
+  rememberMeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderWidth: 2,
+    borderColor: COLORS.inputBorder,
+    borderRadius: 6,
+    marginRight: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: COLORS.primaryGreen,
+    borderColor: COLORS.primaryGreen,
+  },
+  rememberMeText: {
+    fontSize: 14,
+    color: COLORS.darkText,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  accessibilityModal: {
+    backgroundColor: COLORS.card,
+    borderRadius: 16,
+    padding: 24,
+    width: '100%',
+    maxWidth: 320,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: COLORS.darkText,
+    marginBottom: 20,
+  },
+  accessibilityRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  accessibilityLabel: {
+    fontSize: 16,
+    color: COLORS.darkText,
+  },
+  modalCloseBtn: {
+    marginTop: 16,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  modalCloseText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.primaryGreen,
   },
   backButton: {
     minWidth: themeA11y.minTouchTargetSize,
@@ -370,6 +642,24 @@ const styles = StyleSheet.create({
   forgotButton: {
     alignSelf: 'flex-end',
     marginBottom: 24,
+  },
+  biometricButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    marginBottom: 20,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: COLORS.primaryGreen,
+    backgroundColor: COLORS.primaryGreenLight,
+  },
+  biometricButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.primaryGreen,
   },
   forgotText: {
     color: COLORS.primaryGreen,

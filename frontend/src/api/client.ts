@@ -445,7 +445,7 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  login: (payload: { email: string; password: string }) =>
+  login: (payload: { email?: string; phone?: string; password: string } | { email: string; password: string }) =>
     request<{
       access_token: string;
       refresh_token: string;
@@ -500,6 +500,11 @@ export const api = {
     request("/api/users/profile", {
       method: "PUT",
       body: JSON.stringify(data),
+    }),
+
+  deleteAccount: () =>
+    request<{ message: string }>("/api/users/profile", {
+      method: "DELETE",
     }),
 
   /**
@@ -697,21 +702,43 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  // Polling-based subscription for realtime updates (fallback for missing supabase-js)
+  // Realtime subscription: Supabase postgres_changes when available, else polling fallback
   subscribeToBooking: (bookingId: string, callback: (data: any) => void, intervalMs = 5000) => {
     // Initial fetch
-    request(`/api/bookings/${bookingId}`).then(data => callback(data)).catch(err => console.error("Poll error", err));
+    request(`/api/bookings/${bookingId}`).then(data => callback(data)).catch(err => console.error("Realtime init fetch error", err));
+
+    try {
+      const supabase = require("../lib/supabase").getSupabase?.();
+      if (supabase) {
+        const channel = supabase
+          .channel(`booking:${bookingId}`)
+          .on(
+            "postgres_changes",
+            { event: "UPDATE", schema: "public", table: "bookings", filter: `id=eq.${bookingId}` },
+            (payload: { new: Record<string, unknown> }) => {
+              if (payload?.new) callback(payload.new as any);
+            }
+          )
+          .subscribe();
+        return { _type: "realtime", channel };
+      }
+    } catch (e) {
+      console.warn("[API] Supabase Realtime not available, using polling:", e);
+    }
 
     const intervalId = setInterval(() => {
       request(`/api/bookings/${bookingId}`)
         .then(data => callback(data))
         .catch(err => console.error("Poll error", err));
     }, intervalMs);
-    return intervalId;
+    return { _type: "poll", intervalId };
   },
 
-  unsubscribeFromBooking: (subscriptionHandle: any) => {
-    if (subscriptionHandle) clearInterval(subscriptionHandle);
+  unsubscribeFromBooking: (handle: any) => {
+    if (!handle) return;
+    if (handle._type === "realtime" && handle.channel?.unsubscribe) handle.channel.unsubscribe();
+    else if (handle._type === "poll" && handle.intervalId) clearInterval(handle.intervalId);
+    else if (typeof handle === "number") clearInterval(handle);
   },
 
   cancelBooking: (bookingId: string, reason?: string) =>
@@ -820,6 +847,11 @@ export const api = {
 
   // Caregiver Profile
   getCaregiverProfile: () => request("/api/caregivers/profile"),
+  createCaregiverProfile: (data: { skills?: string[]; availability_status?: string;[key: string]: any }) =>
+    request("/api/caregivers/profile", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
   updateCaregiverProfile: (data: { availability_status?: string;[key: string]: any }) =>
     request("/api/caregivers/profile", {
       method: "PUT",
@@ -856,6 +888,42 @@ export const api = {
         attachment_url: data.attachment_url,
       }),
     }),
+
+  /** Upload chat attachment (voice, image) and get public URL. */
+  uploadChatAttachment: async (chatSessionId: string, fileUri: string, fileName?: string, mimeType?: string): Promise<{ url: string }> => {
+    let token = accessToken;
+    if (!token) token = await getTokenFromStorage();
+    if (!token) {
+      const err: any = new Error("Not authenticated");
+      err.code = "UNAUTHORIZED";
+      err.statusCode = 401;
+      throw err;
+    }
+    const formData = new FormData();
+    const name = fileName || "voice.m4a";
+    const type = mimeType || "audio/mp4";
+    formData.append("file", { uri: fileUri, name, type } as any);
+    const url = `${currentBaseUrl}/api/chat/sessions/${chatSessionId}/upload`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      let message = text || `Upload failed (${res.status})`;
+      try {
+        const json = JSON.parse(text);
+        if (json.detail) message = typeof json.detail === "string" ? json.detail : JSON.stringify(json.detail);
+      } catch {
+        // keep message as text
+      }
+      const err: any = new Error(message);
+      err.statusCode = res.status;
+      throw err;
+    }
+    return JSON.parse(text || "{}");
+  },
 
   markMessagesAsRead: (chatSessionId: string) =>
     request(`/api/chat/sessions/${chatSessionId}/read`, {

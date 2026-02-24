@@ -20,17 +20,17 @@ import { useNotification } from './context/NotificationContext';
 import { api } from './api/client';
 import { useErrorHandler } from './hooks/useErrorHandler';
 import BottomNav from './BottomNav';
+import { colors } from './theme';
 
 const { width } = Dimensions.get('window');
 
-// --- THEME CONFIGURATION ---
 const THEME = {
-  primary: "#059669",       // Emerald Green
-  primaryLight: "#D1FAE5",  // Light tint for badges
-  white: "#FFFFFF",
-  black: "#000000",
-  gray: "#F5F7FA",
-  textGray: "#666666"
+  primary: colors.secondary,
+  primaryLight: colors.secondaryLight,
+  white: colors.card,
+  black: colors.textPrimary,
+  gray: colors.background,
+  textGray: colors.textSecondary,
 };
 
 // --- TYPES ---

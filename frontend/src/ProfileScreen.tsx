@@ -22,18 +22,18 @@ import { useErrorHandler } from './hooks/useErrorHandler';
 // --- IMPORT BOTTOM NAV ---
 // Make sure this path matches your project structure
 import BottomNav from './BottomNav';
+import { colors, typography, spacing, layout, borderRadius, shadows } from './theme';
 
-// --- THEME COLORS ---
 const THEME = {
-  bg: "#F5F7FA",        // Light Gray/White Background (Clean)
-  card: "#FFFFFF",      // White Cards
-  primary: "#059669",   // TARGET: Emerald Green
-  text: "#1F2937",      // Dark Gray Text
-  subText: "#6B7280",   // Lighter Gray
-  danger: "#EF4444",    // TARGET: Red
-  dangerBg: "#FEF2F2",  // Light Red for Logout Background
-  iconBg: "#E0F2F1",    // Very Light Green for icon circles
-  divider: "#E5E7EB"    // Light Gray Divider
+  bg: colors.background,
+  card: colors.card,
+  primary: colors.secondary,
+  text: colors.textPrimary,
+  subText: colors.textSecondary,
+  danger: colors.error,
+  dangerBg: '#FEF2F2',
+  iconBg: colors.secondaryLight,
+  divider: colors.border,
 };
 
 export default function ProfileScreen({ navigation }: any) {
@@ -174,6 +174,15 @@ export default function ProfileScreen({ navigation }: any) {
             rightElement={<MaterialCommunityIcons name="chevron-right" size={24} color={THEME.subText} />}
             onPress={() => navigation.navigate('EditProfile')}
           />
+          {user?.role === 'care_recipient' && (
+            <SettingsItem
+              icon="clipboard-check"
+              iconColor={THEME.primary}
+              label="Needs Assessment"
+              rightElement={<MaterialCommunityIcons name="chevron-right" size={24} color={THEME.subText} />}
+              onPress={() => navigation.navigate('ProfileSetup')}
+            />
+          )}
           <SettingsItem
             icon="lock"
             iconColor="#ca8a04"

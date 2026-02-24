@@ -6,21 +6,22 @@ import { useNotification } from './context/NotificationContext';
 import { api } from './api/client';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useErrorHandler } from './hooks/useErrorHandler';
-import { accessibility as a11y } from './theme';
+import { useVoiceSOS } from './hooks/useVoiceSOS';
+import { accessibility as a11y, colors } from './theme';
 import LeafletMap from './components/LeafletMap';
 
 const COLORS = {
   bg: '#0F0F0F',
   card: '#1A1A1A',
   cardBorder: '#2A2A2A',
-  primaryRed: '#DC2626',
+  primaryRed: colors.error,
   primaryRedLight: 'rgba(220, 38, 38, 0.15)',
-  green: '#059669',
+  green: colors.secondary,
   greenLight: 'rgba(5, 150, 105, 0.2)',
-  blue: '#2563EB',
+  blue: colors.primary,
   blueLight: 'rgba(37, 99, 235, 0.2)',
-  white: '#FFFFFF',
-  gray: '#A3A3A3',
+  white: colors.card,
+  gray: colors.textMuted,
   grayDark: '#525252',
 };
 
@@ -33,6 +34,7 @@ const EmergencyScreen = ({ navigation, route }: { navigation: any; route?: any }
   const [emergencyId, setEmergencyId] = useState<string | null>(null);
   const [emergencyStatus, setEmergencyStatus] = useState<'active' | 'acknowledged' | 'resolved' | null>(null);
   const [respondingCaregiver, setRespondingCaregiver] = useState<any>(null);
+  const [careRecipient, setCareRecipient] = useState<any>(null);
 
   const isCaregiver = user?.role === 'caregiver';
   const params = route?.params || {};
@@ -63,6 +65,7 @@ const EmergencyScreen = ({ navigation, route }: { navigation: any; route?: any }
       const statusRes = await api.getEmergencyStatus(id) as any;
       setEmergencyStatus(statusRes.status);
       if (statusRes.caregiver) setRespondingCaregiver(statusRes.caregiver);
+      if (statusRes.care_recipient) setCareRecipient(statusRes.care_recipient);
       const loc = statusRes?.location;
       if (loc && typeof loc.latitude === 'number' && typeof loc.longitude === 'number') {
         setEmergencyMapLocation({ latitude: loc.latitude, longitude: loc.longitude });
@@ -90,8 +93,8 @@ const EmergencyScreen = ({ navigation, route }: { navigation: any; route?: any }
     return () => clearInterval(interval);
   }, [emergencyId, emergencyStatus]);
 
-  const recipientName = notification?.recipientName || data?.care_recipient_name || 'Recipient';
-  const recipientPhoto = data?.care_recipient_photo || 'https://via.placeholder.com/150';
+  const recipientName = careRecipient?.full_name || notification?.recipientName || data?.care_recipient_name || 'Recipient';
+  const recipientPhoto = careRecipient?.profile_photo_url || data?.care_recipient_photo || 'https://via.placeholder.com/150';
   const emergencyContact = user?.emergency_contact as { name?: string; phone?: string } | null;
 
   const scaleAnim = useRef(new Animated.Value(1)).current;
@@ -211,6 +214,10 @@ const EmergencyScreen = ({ navigation, route }: { navigation: any; route?: any }
       triggerInProgressRef.current = false;
     }
   };
+
+  const triggerRef = useRef(triggerEmergency);
+  triggerRef.current = triggerEmergency;
+  const { listening: voiceListening, error: voiceError, supported: voiceSupported, startListening: startVoiceSOS, stopListening: stopVoiceSOS } = useVoiceSOS(() => triggerRef.current());
 
   const acknowledge = async () => {
     if (!emergencyId) return;
@@ -342,6 +349,23 @@ const EmergencyScreen = ({ navigation, route }: { navigation: any; route?: any }
                   )}
                 </Animated.View>
               </Pressable>
+              {!alertSent && (
+                <TouchableOpacity
+                  style={[styles.saySosBtn, voiceListening && styles.saySosBtnActive]}
+                  onPress={voiceListening ? stopVoiceSOS : startVoiceSOS}
+                  disabled={locationLoading}
+                  accessibilityLabel={voiceListening ? 'Stop voice listening' : 'Say SOS to send alert'}
+                  accessibilityRole="button"
+                >
+                  <MaterialCommunityIcons name="microphone" size={20} color={COLORS.white} />
+                  <Text style={styles.saySosBtnText}>
+                    {voiceListening ? 'Listening… Say "SOS"' : 'Say SOS'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+              {voiceError && (
+                <Text style={styles.voiceErrorText}>{voiceError}</Text>
+              )}
             </View>
           )}
 
@@ -354,6 +378,19 @@ const EmergencyScreen = ({ navigation, route }: { navigation: any; route?: any }
                 : (sharedLocation?.location_name || (alertSent ? 'Shared with caregivers' : 'Shared when you send alert'))}
             </Text>
           </View>
+
+          {/* Medical Information - PRD: display for responders */}
+          {(isCaregiver ? (careRecipient?.address as any)?.medical_info : (user as any)?.address?.medical_info) ? (
+            <View style={styles.medicalRow}>
+              <Ionicons name="medical" size={18} color={COLORS.blue} />
+              <Text style={styles.medicalLabel}>Medical info: </Text>
+              <Text style={styles.medicalValue} numberOfLines={3}>
+                {isCaregiver
+                  ? (careRecipient?.address as any)?.medical_info
+                  : (user as any)?.address?.medical_info}
+              </Text>
+            </View>
+          ) : null}
 
           {/* Row 3: Map (fixed height so everything fits) */}
           {emergencyMapLocation ? (
@@ -522,8 +559,25 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.3)',
   },
   sosLabelCompact: { color: COLORS.white, fontSize: 18, fontWeight: '800', letterSpacing: 0.5 },
+  saySosBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: COLORS.cardBorder,
+  },
+  saySosBtnActive: { backgroundColor: COLORS.primaryRed },
+  saySosBtnText: { color: COLORS.white, fontSize: 14, fontWeight: '600' },
+  voiceErrorText: { color: COLORS.gray, fontSize: 12, marginTop: 6, textAlign: 'center' },
   locationRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 6 },
   locationValueCompact: { color: COLORS.white, fontSize: 14, flex: 1 },
+  medicalRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8, gap: 6 },
+  medicalLabel: { color: COLORS.gray, fontSize: 12, flexShrink: 0 },
+  medicalValue: { color: COLORS.white, fontSize: 13, flex: 1 },
   mapPlaceholder: { backgroundColor: COLORS.cardBorder, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   mapPlaceholderText: { color: COLORS.gray, fontSize: 13, marginTop: 6 },
   openMapsBtn: {

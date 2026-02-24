@@ -6,7 +6,7 @@ import React, {
   ReactNode,
 } from "react";
 import * as SecureStore from "expo-secure-store";
-import { api, apiConfigReady, setAccessToken, setRefreshToken, wakeUpBackend } from "../api/client";
+import { api, apiConfigReady, setAccessToken, setRefreshToken, wakeUpBackend, getCurrentApiBaseUrl } from "../api/client";
 import { Platform } from "react-native";
 
 type User = any;
@@ -15,7 +15,8 @@ type AuthContextType = {
   user: User | null;
   accessToken: string | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, opts?: { useBiometrics?: boolean }) => Promise<void>;
+  loginWithBiometrics: () => Promise<void>;
   googleLogin: (idToken: string, role?: "care_recipient" | "caregiver") => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -24,6 +25,7 @@ type AuthContextType = {
 };
 
 const TOKEN_KEY = "assistlink_token";
+const BIOMETRIC_REFRESH_KEY = "assistlink_biometric_refresh";
 
 async function getToken(): Promise<string | null> {
   if (Platform.OS === "web") {
@@ -174,18 +176,24 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     };
   }, []);
 
-  const login = async (email: string, password: string) => {
+  /** Detect if identifier is phone (digits) or email. PRD: Login with email or phone. */
+const isPhoneLike = (s: string) => /^[\d\s\-+]*\d[\d\s\-+]*$/.test(s.replace(/\s/g, '')) && s.replace(/\D/g, '').length >= 10;
+
+  const login = async (emailOrPhone: string, password: string, opts?: { useBiometrics?: boolean }) => {
     console.log("AuthContext: Starting login...");
     await apiConfigReady;
     wakeUpBackend(); // ensure wake-up was sent (e.g. if app opened straight to login)
     const isTimeoutOrNetwork = (e: any) =>
       e?.code === "TIMEOUT" || e?.statusCode === 408 ||
       (e?.message && /timeout|network|connection|fetch/i.test(e?.message || ""));
+    const payload = isPhoneLike(emailOrPhone.trim())
+      ? { phone: emailOrPhone.trim().replace(/\D/g, '').slice(-10), password }
+      : { email: emailOrPhone.trim(), password };
     let lastError: any;
     const maxAttempts = 3; // 3rd attempt after 15s for Render cold start
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        const res = await api.login({ email, password });
+        const res = await api.login(payload);
         lastError = null;
         const token = res?.access_token;
         const refreshToken = res?.refresh_token;
@@ -207,6 +215,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (refreshToken) {
           await setRefreshToken(refreshToken);
         }
+        if (opts?.useBiometrics && refreshToken && Platform.OS !== "web") {
+          try {
+            await SecureStore.setItemAsync(BIOMETRIC_REFRESH_KEY, refreshToken);
+          } catch (e) {
+            console.warn("AuthContext: Failed to save biometric refresh token:", e);
+          }
+        }
 
         try {
           const me = await api.me();
@@ -217,7 +232,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           if (res.user && typeof res.user === "object") {
             setUser(res.user as any);
           } else {
-            setUser({ email, id: res.user?.id || null, role: (res.user as any)?.role || "care_recipient" });
+            setUser({ email: res.user?.email, id: res.user?.id || null, role: (res.user as any)?.role || "care_recipient" });
           }
         }
         return;
@@ -288,6 +303,42 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const loginWithBiometrics = async () => {
+    if (Platform.OS === "web") throw new Error("Biometrics not available on web");
+    await apiConfigReady;
+    const refreshToken = await SecureStore.getItemAsync(BIOMETRIC_REFRESH_KEY);
+    if (!refreshToken) throw new Error("No biometric credentials. Sign in with password first and enable biometrics.");
+    const baseUrl = getCurrentApiBaseUrl();
+    if (!baseUrl) throw new Error("API not configured");
+    const res = await fetch(`${baseUrl}/api/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      try {
+        const j = JSON.parse(text);
+        throw new Error(j.detail || j.message || "Biometric sign-in failed");
+      } catch {
+        throw new Error(text || "Biometric sign-in failed");
+      }
+    }
+    const data = await res.json();
+    const token = data?.access_token;
+    const newRefresh = data?.refresh_token;
+    if (!token) throw new Error("No token received");
+    await setToken(token);
+    setAccessTokenState(token);
+    setAccessToken(token);
+    if (newRefresh) {
+      await setRefreshToken(newRefresh);
+      await SecureStore.setItemAsync(BIOMETRIC_REFRESH_KEY, newRefresh);
+    }
+    const me = await api.me();
+    setUser(me as any);
+  };
+
   const refreshUser = async () => {
     try {
       const token = await getToken();
@@ -317,7 +368,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const logout = async () => {
     try {
       console.log("AuthContext: Logging out...");
-
+      // Keep BIOMETRIC_REFRESH_KEY so user can sign in with biometrics next time
       // Clear state first to trigger immediate navigation
       setAccessTokenState(null);
       setAccessToken(null);
@@ -374,6 +425,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         accessToken: accessTokenState,
         loading,
         login,
+        loginWithBiometrics,
         googleLogin,
         logout,
         refreshUser,

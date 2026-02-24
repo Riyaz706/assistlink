@@ -1,49 +1,44 @@
 /**
- * AssistLink Design System - per PRD (Product Requirements Document)
- * Colors, typography, and spacing for accessibility and production consistency.
+ * AssistLink Design System — Premium, Accessible, Elderly-Friendly
+ * WCAG AA+ / Production-ready UI/UX
+ * 
+ * COLOR SYSTEM (strict):
+ * Primary: #2563EB | Secondary: #059669 | Accent/CTA: #F59E0B
+ * Background: #F8FAFC | Card: #FFFFFF
+ * Text Primary: #1F2937 | Text Secondary: #6B7280
  */
 
 export const colors = {
-  // Primary: Calm Blue - trustworthy and accessible
   primary: '#2563EB',
   primaryDark: '#1D4ED8',
-  primaryLight: '#3B82F6',
-  // Secondary: Emerald Green - care and growth
+  primaryLight: '#DBEAFE',
   secondary: '#059669',
   secondaryDark: '#047857',
-  secondaryLight: '#10B981',
-  // Accent: Warm Amber - highlights and CTA
+  secondaryLight: '#D1FAE5',
   accent: '#F59E0B',
   accentDark: '#D97706',
-  accentLight: '#FBBF24',
-  // Backgrounds
+  accentLight: '#FEF3C7',
   background: '#F8FAFC',
   card: '#FFFFFF',
-  // Text
   textPrimary: '#1F2937',
   textSecondary: '#6B7280',
   textMuted: '#9CA3AF',
-  // Semantic
   error: '#DC2626',
   success: '#059669',
   warning: '#F59E0B',
-  // Borders & dividers
   border: '#E5E7EB',
   divider: '#E5E7EB',
 };
 
 export const typography = {
-  // Minimum 16px for accessibility (PRD)
   minBodySize: 16,
-  // Headings: Inter/Poppins style - clean, legible
-  headingLarge: 24,
+  headingLarge: 26,
   headingMedium: 20,
   headingSmall: 18,
-  // Body: Open Sans / System UI
   body: 16,
   bodySmall: 14,
   caption: 12,
-  // Weights
+  label: 14,
   weightBold: '700' as const,
   weightSemiBold: '600' as const,
   weightMedium: '500' as const,
@@ -59,21 +54,61 @@ export const spacing = {
   xxl: 48,
 };
 
+/** Layout grid — consistent content margins */
+export const layout = {
+  screenPadding: 20,
+  cardPadding: 20,
+  cardGap: 16,
+  sectionGap: 24,
+};
+
 export const borderRadius = {
-  sm: 6,
-  md: 10,
+  sm: 8,
+  md: 12,
   lg: 16,
+  xl: 20,
   full: 9999,
 };
 
-/** High-contrast and large touch targets for accessibility */
+/** Shadows for elevation hierarchy */
+export const shadows = {
+  card: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  cardHover: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 5,
+  },
+  button: {
+    shadowColor: '#059669',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  none: {
+    shadowColor: 'transparent',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
+  },
+};
+
+/** Accessibility — minimum touch targets 48px */
 export const accessibility = {
   minTouchTargetSize: 48,
   minFontSize: 16,
   contrastBorderWidth: 2,
 };
 
-/** High-contrast color set for accessibility mode */
 export const highContrastColors = {
   ...colors,
   primary: '#1D4ED8',
@@ -84,10 +119,7 @@ export const highContrastColors = {
   card: '#FFFFFF',
 };
 
-/**
- * Typography scale for large-text mode (multiplier for base sizes).
- */
-export function getTypographyScale(largeText: boolean): Record<keyof typeof typography, number | string> {
+export function getTypographyScale(largeText: boolean): Record<string, number | string> {
   const scale = largeText ? 1.2 : 1;
   return {
     ...typography,
@@ -105,4 +137,4 @@ export function getTypographyScale(largeText: boolean): Record<keyof typeof typo
   };
 }
 
-export default { colors, typography, spacing, borderRadius, accessibility, highContrastColors, getTypographyScale };
+export default { colors, typography, spacing, layout, borderRadius, shadows, accessibility, highContrastColors, getTypographyScale };

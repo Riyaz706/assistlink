@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { LogBox } from "react-native";
 
+// Init i18n before other imports that might use translations
+import './src/i18n';
+
 // ── Silence non-blocking warnings that clutter the console ───────────────────
 LogBox.ignoreLogs([
   // React Native / Expo Go native module warnings
@@ -48,6 +51,11 @@ export default function App() {
   useEffect(() => {
     async function prepare() {
       try {
+        // Restore saved language before first render
+        const { getStoredLanguage } = await import('./src/i18n');
+        const saved = await getStoredLanguage();
+        const i18n = (await import('./src/i18n')).default;
+        await i18n.changeLanguage(saved);
         // Pre-load fonts, make any API calls you need to do here
         await Font.loadAsync({
           // Add any custom fonts here if needed

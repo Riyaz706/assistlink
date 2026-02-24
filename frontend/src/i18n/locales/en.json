@@ -1,0 +1,37 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "loading": "Loading...",
+    "error": "Error",
+    "ok": "OK"
+  },
+  "auth": {
+    "login": "Log in",
+    "signUp": "Sign up",
+    "email": "Email",
+    "password": "Password",
+    "forgotPassword": "Forgot password?"
+  },
+  "nav": {
+    "home": "Home",
+    "chat": "Chat",
+    "bookings": "Bookings",
+    "settings": "Settings"
+  },
+  "dashboard": {
+    "requestNewCare": "Request New Care",
+    "activeCaregiver": "Active caregiver",
+    "visitInProgress": "Visit in progress",
+    "recentActivity": "Recent Activity",
+    "noRecentActivity": "No recent activity",
+    "currentStatus": "Current Status",
+    "rateYourCaregiver": "Rate your caregiver",
+    "rateNow": "Rate now"
+  },
+  "settings": {
+    "language": "Language",
+    "english": "English",
+    "hindi": "हिन्दी"
+  }
+}
