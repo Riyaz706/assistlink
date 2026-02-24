@@ -96,11 +96,14 @@ const BookingItem = ({ item, onPress }: { item: any; onPress: () => void }) => {
     );
 };
 
+type SlotFilter = 'all' | 'today' | 'week' | 'upcoming' | 'past';
+
 const BookingsScreen = () => {
     const navigation = useNavigation<any>();
     const [bookings, setBookings] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [slotFilter, setSlotFilter] = useState<SlotFilter>('all');
 
     const fetchBookings = async () => {
         try {
@@ -140,6 +143,44 @@ const BookingsScreen = () => {
         fetchBookings();
     };
 
+    const filteredAndSortedBookings = React.useMemo(() => {
+        const now = new Date();
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000 - 1);
+        const weekEnd = new Date(todayStart.getTime() + 7 * 24 * 60 * 60 * 1000);
+        let list = [...bookings];
+        const getSlotTime = (b: any) => {
+            const sd = b?.scheduled_date;
+            return sd ? new Date(sd).getTime() : 0;
+        };
+        if (slotFilter !== 'all') {
+            list = list.filter((b) => {
+                const t = getSlotTime(b);
+                if (!t) return slotFilter === 'upcoming';
+                if (slotFilter === 'today') return t >= todayStart.getTime() && t <= todayEnd.getTime();
+                if (slotFilter === 'week') return t >= todayStart.getTime() && t <= weekEnd.getTime();
+                if (slotFilter === 'upcoming') return t >= now.getTime();
+                if (slotFilter === 'past') return t < todayStart.getTime();
+                return true;
+            });
+        }
+        list.sort((a, b) => {
+            const ta = getSlotTime(a);
+            const tb = getSlotTime(b);
+            if (slotFilter === 'past') return tb - ta;
+            return ta - tb;
+        });
+        return list;
+    }, [bookings, slotFilter]);
+
+    const slotFilterOptions: { key: SlotFilter; label: string }[] = [
+        { key: 'all', label: 'All' },
+        { key: 'today', label: 'Today' },
+        { key: 'week', label: 'This week' },
+        { key: 'upcoming', label: 'Upcoming' },
+        { key: 'past', label: 'Past' },
+    ];
+
     return (
         <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
             <View style={styles.contentWrap}>
@@ -167,9 +208,26 @@ const BookingsScreen = () => {
             {loading ? (
                 <LoadingState message="Loading bookings..." />
             ) : (
+                <>
+                <View style={styles.filterSection}>
+                    <Text style={styles.filterLabel}>Slot date</Text>
+                    <View style={styles.filterRow}>
+                        {slotFilterOptions.map(({ key, label }) => (
+                            <TouchableOpacity
+                                key={key}
+                                style={[styles.filterChip, slotFilter === key && styles.filterChipActive]}
+                                onPress={() => setSlotFilter(key)}
+                            >
+                                <Text style={[styles.filterChipText, slotFilter === key && styles.filterChipTextActive]}>
+                                    {label}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                </View>
                 <FlatList
                     style={styles.listFill}
-                    data={bookings}
+                    data={filteredAndSortedBookings}
                     keyExtractor={(item) => item.id}
                     renderItem={({ item }) => (
                         <BookingItem
@@ -177,20 +235,21 @@ const BookingsScreen = () => {
                             onPress={() => navigation.navigate('BookingDetailScreen', { bookingId: item.id })}
                         />
                     )}
-                    contentContainerStyle={bookings.length === 0 ? styles.listEmpty : styles.list}
+                    contentContainerStyle={filteredAndSortedBookings.length === 0 ? styles.listEmpty : styles.list}
                     refreshControl={
                         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
                     }
                     ListEmptyComponent={
                         <EmptyState
                             icon="calendar-outline"
-                            title="No bookings yet"
-                            message="Create a request to find and book a caregiver."
-                            actionLabel="Create new booking"
-                            onAction={() => navigation.navigate('NewRequestScreen')}
+                            title={slotFilter === 'all' ? 'No bookings yet' : 'No bookings in this period'}
+                            message={slotFilter === 'all' ? 'Create a request to find and book a caregiver.' : 'Try a different filter.'}
+                            actionLabel={slotFilter === 'all' ? 'Create new booking' : 'View all'}
+                            onAction={() => slotFilter === 'all' ? navigation.navigate('NewRequestScreen') : setSlotFilter('all')}
                         />
                     }
                 />
+                </>
             )}
             </View>
             <BottomNav />
@@ -242,6 +301,24 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
     },
+    filterSection: {
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        backgroundColor: '#FFF',
+        borderBottomWidth: 1,
+        borderBottomColor: '#E5E5EA',
+    },
+    filterLabel: { fontSize: 12, fontWeight: '600', color: '#666', marginBottom: 8 },
+    filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    filterChip: {
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: 8,
+        backgroundColor: '#F0F0F0',
+    },
+    filterChipActive: { backgroundColor: '#059669' },
+    filterChipText: { fontSize: 14, fontWeight: '600', color: '#666' },
+    filterChipTextActive: { color: '#FFF' },
     list: {
         padding: 16,
         paddingBottom: 100,

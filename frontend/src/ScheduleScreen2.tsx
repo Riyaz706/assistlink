@@ -414,9 +414,9 @@ export default function ScheduleScreen2({ navigation }: any) {
           </TouchableOpacity>
         </View>
 
-        {/* Date range filter */}
+        {/* Slot date range filter */}
       <View style={styles.filterSection}>
-        <Text style={styles.filterLabel}>Date</Text>
+        <Text style={styles.filterLabel}>Slot date</Text>
         <View style={styles.filterRow}>
           {(['date', 'week', 'all'] as const).map((range) => (
             <TouchableOpacity

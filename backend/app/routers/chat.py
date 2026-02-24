@@ -32,8 +32,6 @@ async def get_chat_sessions(current_user: dict = Depends(get_current_user)):
         
         # Build query - get sessions where user is either care_recipient or caregiver
         query = supabase_admin.table("chat_sessions").select("*").or_(f"care_recipient_id.eq.{user_id},caregiver_id.eq.{user_id}")
-        query = query.order("created_at", desc=True)
-        
         response = query.execute()
         sessions = response.data or []
         
@@ -62,16 +60,32 @@ async def get_chat_sessions(current_user: dict = Depends(get_current_user)):
                     print(f"Error fetching caregiver data: {e}")
                     enriched_session["caregiver"] = None
             
-            # Get last message for preview
+            # Get last message for preview and timestamp (for sorting - latest first)
             try:
-                last_message_response = supabase_admin.table("messages").select("content").eq("chat_session_id", session["id"]).order("created_at", desc=True).limit(1).execute()
+                last_message_response = supabase_admin.table("messages").select("content, created_at").eq("chat_session_id", session["id"]).order("created_at", desc=True).limit(1).execute()
                 if last_message_response.data and len(last_message_response.data) > 0:
-                    enriched_session["last_message"] = last_message_response.data[0].get("content", "")
+                    lm = last_message_response.data[0]
+                    enriched_session["last_message"] = lm.get("content", "")
+                    enriched_session["last_message_at"] = lm.get("created_at")
             except Exception as e:
                 print(f"Error fetching last message: {e}")
                 enriched_session["last_message"] = None
+                enriched_session["last_message_at"] = None
             
             enriched_sessions.append(enriched_session)
+        
+        # Sort by latest message first (upward = newest at top)
+        def sort_key(s: dict):
+            lm_at = s.get("last_message_at")
+            if lm_at:
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(lm_at.replace("Z", "+00:00")) if isinstance(lm_at, str) else lm_at
+                    return dt.timestamp()
+                except (ValueError, TypeError):
+                    pass
+            return 0
+        enriched_sessions.sort(key=sort_key, reverse=True)
         
         return enriched_sessions
     
