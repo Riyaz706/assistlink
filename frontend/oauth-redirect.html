@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Signing in...</title>
+  <style>
+    body { font-family: system-ui; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: #f5f5f5; }
+    .box { text-align: center; padding: 2rem; }
+    .spinner { width: 40px; height: 40px; border: 3px solid #e0e0e0; border-top-color: #22c55e; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 1rem; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div class="spinner"></div>
+    <p>Completing sign in...</p>
+    <p style="font-size:12px;color:#666">If this doesn't close automatically, open AssistLink.</p>
+  </div>
+  <script>
+    // Pass OAuth params to the app via deep link. Chrome Custom Tabs often doesn't
+    // hand off assistlink:// directly from Google's redirect, so we use this
+    // HTTPS page as an interstitial; loading it lets expo-auth-session capture the
+    // URL. As fallback, we also redirect to the app scheme.
+    (function() {
+      var q = location.search || '';
+      var h = location.hash || '';
+      var target = 'assistlink://redirect' + q + h;
+      try {
+        window.location.replace(target);
+      } catch (e) {}
+      setTimeout(function() {
+        try { window.location.replace(target); } catch (e) {}
+      }, 500);
+    })();
+  </script>
+</body>
+</html>

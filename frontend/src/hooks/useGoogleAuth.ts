@@ -36,21 +36,31 @@ export function useGoogleAuth() {
     const [error, setError] = useState<string | null>(null);
 
 
-    // Use Android/iOS client on native so Google validates by package+SHA-1, not redirect URI.
-    // Explicit redirect so auth returns to our app instead of staying in browser.
-    // In standalone builds, use our scheme so redirect opens the app; Expo Go uses its default.
+    // Android: Use HTTPS redirect (Chrome Custom Tabs often fails to hand off assistlink:// to the app).
+    // The interstitial page at our Firebase URL loads in the browser, then redirects to the app.
+    // iOS/Web: Use standard scheme-based or origin redirect.
     const isStandalone = Constants.executionEnvironment === 'standalone' || Constants.executionEnvironment === 'bare';
-    const redirectUriOptions = {
-        scheme: 'assistlink',
-        path: 'redirect',
-        ...(Platform.OS !== 'web' && isStandalone && { native: 'assistlink://redirect' }),
-    };
+    const ANDROID_HTTPS_REDIRECT = 'https://assistlink-67bb3-1a64d.web.app/oauth-redirect';
+
+    const redirectUriOptions = Platform.OS === 'android' && isStandalone
+        ? { native: ANDROID_HTTPS_REDIRECT }
+        : {
+            scheme: 'assistlink',
+            path: 'redirect',
+            ...(Platform.OS !== 'web' && isStandalone && { native: 'assistlink://redirect' }),
+        };
+
+    // On Android with HTTPS redirect, use Web client so Google accepts the https redirect URI.
+    const androidClientIdForAuth = Platform.OS === 'android' && isStandalone
+        ? GOOGLE_WEB_CLIENT_ID
+        : GOOGLE_ANDROID_CLIENT_ID;
+
     const [request, response, promptAsync] = Google.useIdTokenAuthRequest(
         {
             clientId: GOOGLE_WEB_CLIENT_ID,
             webClientId: GOOGLE_WEB_CLIENT_ID,
             iosClientId: GOOGLE_IOS_CLIENT_ID,
-            androidClientId: GOOGLE_ANDROID_CLIENT_ID,
+            androidClientId: androidClientIdForAuth,
         },
         redirectUriOptions
     );
@@ -67,8 +77,11 @@ export function useGoogleAuth() {
         }
     }, [request]);
 
-    // Ensure auth browser is dismissed when app resumes (e.g. after redirect back from Google)
+    // Ensure auth browser is dismissed when app resumes (e.g. after redirect back from Google).
+    // Critical for Android: when user signs in and redirects to assistlink://, the app comes to foreground
+    // and maybeCompleteAuthSession must run to close the browser and capture the auth result.
     useEffect(() => {
+        WebBrowser.maybeCompleteAuthSession();
         const sub = AppState.addEventListener('change', (state) => {
             if (state === 'active') {
                 WebBrowser.maybeCompleteAuthSession();
@@ -106,7 +119,10 @@ export function useGoogleAuth() {
                 throw new Error('Google auth request not initialized');
             }
 
-            const result = await promptAsync();
+            // On Android, createTask: false keeps the auth browser in the same task as the app,
+            // so the redirect back to assistlink:// properly returns control to the app instead of staying in browser.
+            const promptOptions = Platform.OS === 'android' ? { createTask: false } : undefined;
+            const result = await promptAsync(promptOptions);
 
             if (result.type === 'success') {
                 const { id_token, authentication } = result.params;

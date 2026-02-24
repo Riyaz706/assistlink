@@ -2,16 +2,10 @@
   "hosting": {
     "site": "assistlink-67bb3-1a64d",
     "public": "dist",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ],
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [
-      {
-        "source": "**",
-        "destination": "/index.html"
-      }
+      {"source": "/oauth-redirect", "destination": "/oauth-redirect.html"},
+      {"source": "**", "destination": "/index.html"}
     ]
   }
 }
