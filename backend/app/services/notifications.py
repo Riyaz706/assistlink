@@ -356,16 +356,32 @@ async def notify_new_message(recipient_id: str, sender_name: str, message_id: st
     )
 
 
-async def notify_booking_created(caregiver_id: str, care_recipient_name: str, booking_id: str):
-    """Notify caregiver about new booking"""
+async def notify_booking_created(
+    caregiver_id: str,
+    care_recipient_name: str,
+    booking_id: str,
+    *,
+    scheduled_date: Optional[str] = None,
+):
+    """Notify caregiver about new booking. Optionally include slot date/time in body."""
+    body = f"{care_recipient_name} has created a new booking request"
+    if scheduled_date:
+        try:
+            from datetime import datetime
+            dt = datetime.fromisoformat(scheduled_date.replace("Z", "+00:00"))
+            slot_str = dt.strftime("%b %d, %Y at %I:%M %p")
+            body = f"{care_recipient_name} has created a booking for {slot_str}"
+        except (ValueError, AttributeError):
+            pass
     return await create_notification(
         user_id=caregiver_id,
         notification_type="booking",
         title="New Booking Request",
-        body=f"{care_recipient_name} has created a new booking request",
+        body=body,
         data={
             "booking_id": booking_id,
-            "action": "view_booking"
+            "action": "view_booking",
+            "scheduled_date": scheduled_date,
         }
     )
 

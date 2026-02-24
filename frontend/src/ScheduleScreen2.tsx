@@ -18,7 +18,7 @@ import { api } from './api/client';
 import { useAuth } from './context/AuthContext';
 import { useErrorHandler } from './hooks/useErrorHandler';
 import BottomNav from './BottomNav';
-import { getServiceTypeLabel } from './constants/labels';
+import { getServiceTypeLabel, formatSlotDateTime } from './constants/labels';
 
 const THEME = {
   primary: '#059669',
@@ -265,7 +265,7 @@ export default function ScheduleScreen2({ navigation }: any) {
 
     if (type === 'booking') {
       const serviceLabel = getServiceTypeLabel(item.service_type) || 'Booking';
-      const dateTime = item.scheduled_date ? formatTime(item.scheduled_date) : 'Date not set';
+      const slotInfo = formatSlotDateTime(item.scheduled_date) || 'Date not set';
       const isRequest = (item.status || '').toLowerCase() === 'requested';
       return (
         <TouchableOpacity style={styles.card} onPress={() => openBooking(item.id)} activeOpacity={0.7}>
@@ -286,7 +286,7 @@ export default function ScheduleScreen2({ navigation }: any) {
             <View style={{ marginLeft: 12, flex: 1 }}>
               <Text style={styles.name}>{careRecipient.full_name || 'Care Recipient'}</Text>
               <Text style={styles.service}>{serviceLabel}</Text>
-              <Text style={styles.meta}>{dateTime}</Text>
+              <Text style={styles.meta}>{slotInfo}</Text>
             </View>
             <View
               style={[styles.statusBadge, { backgroundColor: statusColor(item.status) + '33' }]}
@@ -330,7 +330,7 @@ export default function ScheduleScreen2({ navigation }: any) {
           <View style={{ marginLeft: 12, flex: 1 }}>
             <Text style={styles.name}>{careRecipient.full_name || 'Care Recipient'}</Text>
             <Text style={styles.service}>Video Call • {item.duration_seconds || 15}s</Text>
-            <Text style={styles.meta}>{item.scheduled_time ? formatTime(item.scheduled_time) : 'Date not set'}</Text>
+            <Text style={styles.meta}>{item.scheduled_time ? formatSlotDateTime(item.scheduled_time) : 'Date not set'}</Text>
           </View>
           <View
             style={[styles.statusBadge, { backgroundColor: statusColor(item.status) + '33' }]}

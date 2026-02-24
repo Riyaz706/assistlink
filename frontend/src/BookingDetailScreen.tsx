@@ -16,7 +16,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { api } from './api/client';
 import { useAuth } from './context/AuthContext';
 import BottomNav from './BottomNav';
-import { getServiceTypeLabel, getBookingStatusLabel, SECTION_LABELS, FIELD_LABELS } from './constants/labels';
+import { getServiceTypeLabel, getBookingStatusLabel, formatSlotDate, formatSlotTime, SECTION_LABELS, FIELD_LABELS } from './constants/labels';
 
 const TIMELINE_BLUE = '#007AFF';
 const TIMELINE_GREEN = '#22C55E';
@@ -360,7 +360,8 @@ const BookingDetailScreen = () => {
                     {booking.care_recipient?.full_name && <DetailRow label={FIELD_LABELS.CARE_RECIPIENT} value={booking.care_recipient.full_name} />}
                     {booking.caregiver?.full_name && <DetailRow label={FIELD_LABELS.CAREGIVER} value={booking.caregiver.full_name} />}
                     <DetailRow label={FIELD_LABELS.SERVICE_TYPE} value={getServiceTypeLabel(booking.service_type)} />
-                    <DetailRow label={FIELD_LABELS.DATE_TIME} value={booking.scheduled_date ? new Date(booking.scheduled_date).toLocaleString() : FIELD_LABELS.NOT_SET} />
+                    <DetailRow label="Slot Date" value={formatSlotDate(booking.scheduled_date) || FIELD_LABELS.NOT_SET} />
+                    <DetailRow label="Slot Time" value={formatSlotTime(booking.scheduled_date) || FIELD_LABELS.NOT_SET} />
                     <DetailRow label={FIELD_LABELS.DURATION} value={`${booking.duration_hours ?? 0} hours`} />
                     {booking.location && (
                         <DetailRow

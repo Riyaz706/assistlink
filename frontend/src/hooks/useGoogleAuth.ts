@@ -1,15 +1,26 @@
 import { useEffect, useState } from 'react';
+import { AppState, Platform } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
 import Constants from 'expo-constants';
 
-// Required for Expo Go to work properly
+// Required so the auth browser closes and returns to the app after redirect
 WebBrowser.maybeCompleteAuthSession();
 
-// These will be loaded from environment variables
-const GOOGLE_WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || Constants.expoConfig?.extra?.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '';
-const GOOGLE_IOS_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || Constants.expoConfig?.extra?.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '';
-const GOOGLE_ANDROID_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || Constants.expoConfig?.extra?.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || '';
+// Load from env (dev) or expoConfig.extra (EAS build). Check extra first for reliability in built apps.
+function getGoogleClientIds() {
+  const extra = Constants.expoConfig?.extra || {};
+  return {
+    web: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || extra.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '',
+    ios: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || extra.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '',
+    android: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || extra.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || '',
+  };
+}
+
+const ids = getGoogleClientIds();
+const GOOGLE_WEB_CLIENT_ID = ids.web;
+const GOOGLE_IOS_CLIENT_ID = ids.ios || ids.web; // Fallback to web if no iOS client
+const GOOGLE_ANDROID_CLIENT_ID = ids.android;
 
 export interface GoogleAuthResult {
     idToken: string | null;
@@ -26,7 +37,14 @@ export function useGoogleAuth() {
 
 
     // Use Android/iOS client on native so Google validates by package+SHA-1, not redirect URI.
-    // Otherwise custom scheme (exp://, assistlink://) causes "Custom scheme URIs are not allowed for 'WEB' client type".
+    // Explicit redirect so auth returns to our app instead of staying in browser.
+    // In standalone builds, use our scheme so redirect opens the app; Expo Go uses its default.
+    const isStandalone = Constants.executionEnvironment === 'standalone' || Constants.executionEnvironment === 'bare';
+    const redirectUriOptions = {
+        scheme: 'assistlink',
+        path: 'redirect',
+        ...(Platform.OS !== 'web' && isStandalone && { native: 'assistlink://redirect' }),
+    };
     const [request, response, promptAsync] = Google.useIdTokenAuthRequest(
         {
             clientId: GOOGLE_WEB_CLIENT_ID,
@@ -34,14 +52,30 @@ export function useGoogleAuth() {
             iosClientId: GOOGLE_IOS_CLIENT_ID,
             androidClientId: GOOGLE_ANDROID_CLIENT_ID,
         },
-        {}
+        redirectUriOptions
     );
 
     useEffect(() => {
+        const web = !!GOOGLE_WEB_CLIENT_ID;
+        const android = !!GOOGLE_ANDROID_CLIENT_ID;
+        const ios = !!GOOGLE_IOS_CLIENT_ID;
+        if (!web || (Platform.OS === 'android' && !android) || (Platform.OS === 'ios' && !ios)) {
+            console.warn('[GoogleAuth] Missing client IDs. Web:', web, 'Android:', android, 'iOS:', ios, '- Add EXPO_PUBLIC_GOOGLE_*_CLIENT_ID to .env (dev) or EAS env (build).');
+        }
         if (request) {
-            console.log('[GoogleAuth] Redirect URI:', request.redirectUri);
+            console.log('[GoogleAuth] Ready. Redirect URI:', request.redirectUri);
         }
     }, [request]);
+
+    // Ensure auth browser is dismissed when app resumes (e.g. after redirect back from Google)
+    useEffect(() => {
+        const sub = AppState.addEventListener('change', (state) => {
+            if (state === 'active') {
+                WebBrowser.maybeCompleteAuthSession();
+            }
+        });
+        return () => sub.remove();
+    }, []);
 
     useEffect(() => {
         if (response?.type === 'success') {

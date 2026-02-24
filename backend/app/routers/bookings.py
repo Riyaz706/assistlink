@@ -459,11 +459,13 @@ async def accept_video_call_request(
                         try:
                             care_recipient_response = supabase_admin.table("users").select("full_name").eq("id", video_call["care_recipient_id"]).execute()
                             care_recipient_name = care_recipient_response.data[0].get("full_name", "A care recipient") if care_recipient_response.data else "A care recipient"
-                            
+                            sd = (booking_response.data[0] if booking_response.data else {}).get("scheduled_date") or video_call.get("scheduled_time")
+                            sd_iso = sd.isoformat() if hasattr(sd, "isoformat") else str(sd) if sd else None
                             await notify_booking_created(
                                 caregiver_id=str(video_call["caregiver_id"]),
                                 care_recipient_name=care_recipient_name,
-                                booking_id=booking_id
+                                booking_id=booking_id,
+                                scheduled_date=sd_iso,
                             )
                         except Exception as notif_error:
                             print(f"[WARN] Error sending booking notification: {notif_error}", flush=True)
@@ -1231,7 +1233,9 @@ async def create_slot_booking(
         try:
             care_recipient_response = supabase_admin.table("users").select("full_name").eq("id", user_id).execute()
             care_recipient_name = (care_recipient_response.data[0].get("full_name", "A care recipient") if care_recipient_response.data else "A care recipient")
-            await notify_booking_created(caregiver_id=caregiver_id, care_recipient_name=care_recipient_name, booking_id=booking_id)
+            sd = booking.get("scheduled_date")
+            sd_iso = sd.isoformat() if hasattr(sd, "isoformat") else str(sd) if sd else None
+            await notify_booking_created(caregiver_id=caregiver_id, care_recipient_name=care_recipient_name, booking_id=booking_id, scheduled_date=sd_iso)
         except Exception as e:
             print(f"[WARN] Failed to send notification: {e}", flush=True)
 
@@ -1296,7 +1300,9 @@ async def create_booking(
                 try:
                     care_recipient_response = supabase_admin.table("users").select("full_name").eq("id", user_id).execute()
                     care_recipient_name = (care_recipient_response.data[0].get("full_name", "A care recipient") if care_recipient_response.data else "A care recipient")
-                    await notify_booking_created(caregiver_id=caregiver_id_str, care_recipient_name=care_recipient_name, booking_id=booking_id)
+                    sd = booking.get("scheduled_date")
+                    sd_iso = sd.isoformat() if hasattr(sd, "isoformat") else str(sd) if sd else None
+                    await notify_booking_created(caregiver_id=caregiver_id_str, care_recipient_name=care_recipient_name, booking_id=booking_id, scheduled_date=sd_iso)
                 except Exception as e:
                     print(f"[WARN] Failed to send notification: {e}", flush=True)
             return booking
@@ -1357,7 +1363,9 @@ async def create_booking(
             try:
                 care_recipient_response = supabase_admin.table("users").select("full_name").eq("id", user_id).execute()
                 care_recipient_name = care_recipient_response.data[0].get("full_name", "A care recipient") if care_recipient_response.data else "A care recipient"
-                await notify_booking_created(caregiver_id=str(caregiver_id), care_recipient_name=care_recipient_name, booking_id=booking_id)
+                sd = booking_dict.get("scheduled_date")
+                sd_iso = sd.isoformat() if hasattr(sd, "isoformat") else str(sd) if sd else None
+                await notify_booking_created(caregiver_id=str(caregiver_id), care_recipient_name=care_recipient_name, booking_id=booking_id, scheduled_date=sd_iso)
             except Exception as e:
                 print(f"[WARN] Failed to send notification: {e}", flush=True)
         return booking

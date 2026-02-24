@@ -69,3 +69,41 @@ export function getBookingStatusLabel(status: string): string {
   const key = (status || '').toLowerCase().trim();
   return BOOKING_STATUS_LABELS[key] ?? key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
+
+/** Format booking slot date and time for display (e.g. "Jan 15, 2025 at 2:30 PM") */
+export function formatSlotDateTime(scheduledDate: string | null | undefined): string {
+  if (!scheduledDate) return '';
+  try {
+    const d = new Date(scheduledDate);
+    if (Number.isNaN(d.getTime())) return '';
+    const dateStr = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+    const timeStr = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
+    return `${dateStr} at ${timeStr}`;
+  } catch {
+    return '';
+  }
+}
+
+/** Format slot date only (e.g. "Mon, Jan 15, 2025") */
+export function formatSlotDate(scheduledDate: string | null | undefined): string {
+  if (!scheduledDate) return '';
+  try {
+    const d = new Date(scheduledDate);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+  } catch {
+    return '';
+  }
+}
+
+/** Format slot time only (e.g. "2:30 PM") */
+export function formatSlotTime(scheduledDate: string | null | undefined): string {
+  if (!scheduledDate) return '';
+  try {
+    const d = new Date(scheduledDate);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
+  } catch {
+    return '';
+  }
+}

@@ -15,7 +15,7 @@ import { api } from './api/client';
 import { LoadingState } from './components/LoadingState';
 import { EmptyState } from './components/EmptyState';
 import BottomNav from './BottomNav';
-import { getServiceTypeLabel, getBookingStatusLabel, ROLE_LABELS } from './constants/labels';
+import { getServiceTypeLabel, getBookingStatusLabel, formatSlotDateTime, ROLE_LABELS } from './constants/labels';
 
 const StatusBadge = ({ status }: { status: string }) => {
     let color = '#666';
@@ -62,8 +62,7 @@ const StatusBadge = ({ status }: { status: string }) => {
 };
 
 const BookingItem = ({ item, onPress }: { item: any; onPress: () => void }) => {
-    const date = item.scheduled_date ? new Date(item.scheduled_date).toLocaleDateString() : '—';
-    const time = item.scheduled_date ? new Date(item.scheduled_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    const slotDateTime = formatSlotDateTime(item.scheduled_date);
     const serviceLabel = getServiceTypeLabel(item.service_type);
     const partnerName = item.caregiver?.full_name || item.care_recipient?.full_name;
     const roleLabel = item.caregiver ? ROLE_LABELS.CAREGIVER : ROLE_LABELS.CARE_RECIPIENT;
@@ -78,7 +77,7 @@ const BookingItem = ({ item, onPress }: { item: any; onPress: () => void }) => {
             <View style={styles.cardBody}>
                 <View style={styles.row}>
                     <Ionicons name="calendar-outline" size={16} color="#666" />
-                    <Text style={styles.rowText}>{date}{time ? ` • ${time}` : ''}</Text>
+                    <Text style={styles.rowText}>Slot: {slotDateTime || 'Not set'}</Text>
                 </View>
                 <View style={styles.row}>
                     <Ionicons name="time-outline" size={16} color="#666" />
