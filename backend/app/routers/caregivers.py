@@ -329,25 +329,12 @@ async def list_caregivers(
                     )
                     continue  # Skip this caregiver
 
-                # Check for active bookings (requested, accepted, or in_progress - but NOT completed)
-                # DB enum uses "requested" not "pending"
-                active_bookings = (
-                    supabase_admin.table("bookings")
-                    .select("id")
-                    .eq("caregiver_id", caregiver_id)
-                    .in_("status", ["requested", "accepted", "in_progress"])
-                    .execute()
-                )
+                # Do NOT exclude caregivers with active bookings. A caregiver can have a booking
+                # for Monday and still be available for Tuesday. The slot picker and booking API
+                # handle overlap checks when the user selects a specific date/time. Excluding them
+                # here would hide caregivers from "Find caregiver" after first booking (bug).
 
-                # If caregiver has active bookings, exclude them
-                if active_bookings.data and len(active_bookings.data) > 0:
-                    print(
-                        f"[WARN] Excluding caregiver {caregiver_id} - has {len(active_bookings.data)} active bookings",
-                        flush=True,
-                    )
-                    continue  # Skip this caregiver
-
-                # Caregiver has no active commitments - they should be available
+                # Caregiver has no active video calls - they should be available
                 # Check manual availability status, but if they have no commitments, they're effectively available
                 profile = _normalize_profile(caregiver.get("caregiver_profile"))
                 availability_status_value = profile.get("availability_status") if profile else None
