@@ -40,7 +40,7 @@ export function useGoogleAuth() {
     // The interstitial page at our Firebase URL loads in the browser, then redirects to the app.
     // iOS/Web: Use standard scheme-based or origin redirect.
     const isStandalone = Constants.executionEnvironment === 'standalone' || Constants.executionEnvironment === 'bare';
-    const ANDROID_HTTPS_REDIRECT = 'https://assistlink-67bb3-1a64d.web.app/oauth-redirect';
+    const ANDROID_HTTPS_REDIRECT = 'https://assistlink-67bb3-1a64d.firebaseapp.com/oauth-redirect';
 
     const redirectUriOptions = Platform.OS === 'android' && isStandalone
         ? { native: ANDROID_HTTPS_REDIRECT }

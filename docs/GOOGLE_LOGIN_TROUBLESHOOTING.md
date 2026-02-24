@@ -84,12 +84,12 @@ If you sign in on Google successfully but the browser stays open or doesn't retu
    cd frontend
    npm run deploy:web
    ```
-   This deploys `oauth-redirect.html` to Firebase Hosting. The redirect URL is `https://assistlink-67bb3-1a64d.web.app/oauth-redirect`.
+   This deploys `oauth-redirect.html` to Firebase Hosting. The redirect URL is `https://assistlink-67bb3-1a64d.firebaseapp.com/oauth-redirect`.
 
 2. **Add the redirect URI to Google Cloud Console:**
    - Open [Google Cloud Console](https://console.cloud.google.com/apis/credentials) → your **Web** OAuth client (not Android).
    - Go to **Authorized redirect URIs**.
-   - Add: `https://assistlink-67bb3-1a64d.web.app/oauth-redirect`
+   - Add: `https://assistlink-67bb3-1a64d.firebaseapp.com/oauth-redirect`
    - Save.
 
 3. **Use an EAS-built APK** for testing, not Expo Go.
@@ -119,7 +119,7 @@ Check logs after tapping "Sign in with Google":
 
 - [ ] Render has `GOOGLE_WEB_CLIENT_ID`, `GOOGLE_ANDROID_CLIENT_ID`, `GOOGLE_IOS_CLIENT_ID`
 - [ ] Google Cloud Android OAuth client has correct package `com.assistlink.app` and SHA-1
-- [ ] **Android:** OAuth redirect page deployed (`npm run deploy:web`) and `https://assistlink-67bb3-1a64d.web.app/oauth-redirect` added to Web client's Authorized redirect URIs
+- [ ] **Android:** OAuth redirect page deployed (`npm run deploy:web`) and `https://assistlink-67bb3-1a64d.firebaseapp.com/oauth-redirect` added to Web client's Authorized redirect URIs
 - [ ] **Web:** Redirect URI from `[GoogleAuth] Ready` is added to Web client's Authorized redirect URIs
 - [ ] `GOOGLE_ANDROID_CLIENT_ID` in app matches the backend and the Android client in Google Cloud
 - [ ] For local dev: `frontend/.env` has the Google client IDs
